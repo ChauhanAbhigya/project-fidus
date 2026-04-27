@@ -2,6 +2,7 @@ from supabase import create_client
 import streamlit as st
 import pandas as pd
 import os
+import math
 
 # ---------------- SUPABASE ----------------
 SUPABASE_URL = "https://eicwssbhjfvekaerjljm.supabase.co"
@@ -228,11 +229,26 @@ elif page == "📤 Upload Data" and username == "admin":
 
                 df = df.dropna(subset=["part_no", "brand"])
 
+                # ---------------- FIX: CLEAN NaN / INF ----------------
+                df = df.where(pd.notnull(df), None)
+
                 data = df.to_dict(orient="records")
 
-                supabase.table("parts_table_v2").insert(data).execute()
+                clean_data = []
+                for row in data:
+                    clean_row = {}
+                    for k, v in row.items():
+                        if v is None:
+                            clean_row[k] = None
+                        elif isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+                            clean_row[k] = None
+                        else:
+                            clean_row[k] = v
+                    clean_data.append(clean_row)
 
-                total_rows += len(data)
+                supabase.table("parts_table_v2").insert(clean_data).execute()
+
+                total_rows += len(clean_data)
 
             except Exception as e:
                 st.error(f"❌ Error: {e}")
@@ -263,7 +279,5 @@ elif page == "🛠 Admin Panel" and username == "admin":
         selected_user = st.selectbox("Select User", user_list)
 
         if st.button("Delete User"):
-            supabase.table("users").delete().eq("username", selected_user).execute()
-            st.success("User deleted")
             supabase.table("users").delete().eq("username", selected_user).execute()
             st.success("User deleted")
