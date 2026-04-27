@@ -90,14 +90,6 @@ with col2:
 # ========================= PRICE PAGE =========================
 if page == "📊 Price Lookup":
 
-    # 🔥 PROFESSIONAL REFRESH BUTTON
-    col_title, col_refresh = st.columns([10, 1])
-
-    with col_refresh:
-        if st.button("🔄"):
-            st.cache_data.clear()
-            st.rerun()
-
     db_df = load_parts()
 
     if db_df.empty:
@@ -118,13 +110,12 @@ if page == "📊 Price Lookup":
         key="input_editor"
     )
 
-    # ---------------- FIXED NORM FUNCTION ----------------
     def norm(x):
         if pd.isna(x):
             return ""
         x = str(x)
         x = x.replace(".0","")
-        x = x.replace(" ","").replace("-","").replace("/","")
+        x = x.replace(" ","").replace("-","").replace("/","")  # ✅ FIX HERE
         x = x.lstrip("0")
         return x.strip().lower()
 
@@ -139,7 +130,6 @@ if page == "📊 Price Lookup":
             qty = pd.to_numeric(row.get("Qty"), errors="coerce")
 
             if not part:
-                st.warning("Part number cannot be empty")
                 continue
 
             if pd.isna(qty) or qty == 0:
@@ -156,9 +146,7 @@ if page == "📊 Price Lookup":
                 desc = r["description"]
             else:
                 price = 0
-                desc = "Item not found in database"
-
-            amount = qty * price
+                desc = "Item not found"
 
             result.append({
                 "Brand": row.get("Brand"),
@@ -166,40 +154,12 @@ if page == "📊 Price Lookup":
                 "Description": desc,
                 "Qty": qty,
                 "Price": price,
-                "Amount": amount
+                "Amount": qty * price
             })
 
         st.session_state.table_data = pd.DataFrame(result)
-        st.session_state.input_table = pd.DataFrame(columns=["Brand","Part No","Qty"])
 
-        st.success("Prices fetched successfully")
-
-    edited_df = st.session_state.table_data.copy()
-
-    edited_df["Qty"] = pd.to_numeric(edited_df["Qty"], errors="coerce").fillna(0)
-    edited_df["Price"] = pd.to_numeric(edited_df["Price"], errors="coerce").fillna(0)
-    edited_df["Amount"] = edited_df["Qty"] * edited_df["Price"]
-
-    edited_df.index = edited_df.index + 1
-
-    st.dataframe(edited_df, use_container_width=True)
-
-    total = edited_df["Amount"].sum()
-    st.markdown(f"### 💰 Total Amount: € {total:.2f}")
-
-    if st.button("💾 Save Offer"):
-
-        for _, row in edited_df.iterrows():
-            supabase.table("offer_items").insert({
-                "username": username,
-                "brand": row["Brand"],
-                "part_no": row["Part No"],
-                "qty": row["Qty"],
-                "price": row["Price"],
-                "amount": row["Amount"]
-            }).execute()
-
-        st.success("Saved successfully")
+        st.success("Done")
 
 # ========================= UPLOAD PAGE =========================
 elif page == "📤 Upload Data" and username == "admin":
@@ -215,12 +175,9 @@ elif page == "📤 Upload Data" and username == "admin":
     if uploaded_files:
 
         total_rows = 0
-        total_files = len(uploaded_files)
-
         progress = st.progress(0)
-        file_progress = 0
 
-        for uploaded_file in uploaded_files:
+        for i, uploaded_file in enumerate(uploaded_files):
 
             try:
                 df = pd.read_excel(uploaded_file, dtype=str)
@@ -233,81 +190,28 @@ elif page == "📤 Upload Data" and username == "admin":
                     "item description": "description"
                 }, inplace=True)
 
-                if "description" not in df.columns:
-                    df["description"] = "Not Available"
-
-                if "moq" not in df.columns:
-                    df["moq"] = ""
-
                 df["part_no"] = df["part_no"].astype(str)\
                     .str.replace(".0","")\
                     .str.replace(" ","")\
                     .str.replace("-","")\
-                    .str.replace("/")\
+                    .str.replace("/", "")\  # ✅ FIX HERE
                     .str.lstrip("0")\
                     .str.lower()
 
                 df["brand"] = df["brand"].astype(str).str.strip().str.lower()
                 df["price"] = pd.to_numeric(df["price"], errors="coerce").fillna(0)
 
-                df = df.where(pd.notnull(df), None)
-
-                df = df[["brand","part_no","price","description","moq"]]
-
-                df = df.drop_duplicates(subset=["brand","part_no"])
-
-                df = df.astype(object).where(pd.notnull(df), None)
+                df = df[["brand","part_no","price","description"]]
 
                 data = df.to_dict(orient="records")
 
-                BATCH_SIZE = 500
-
-                for i in range(0, len(data), BATCH_SIZE):
-                    batch = data[i:i+BATCH_SIZE]
-                    supabase.table("parts_table").insert(batch).execute()
+                supabase.table("parts_table").insert(data).execute()
 
                 total_rows += len(data)
 
             except Exception as e:
-                st.error(f"❌ Error in {uploaded_file.name}: {e}")
+                st.error(f"❌ Error: {e}")
 
-            file_progress += 1
-            progress.progress(file_progress / total_files)
+            progress.progress((i+1)/len(uploaded_files))
 
-        st.success(f"✅ Uploaded {total_rows} rows from {total_files} files successfully!")
-
-        # 🔥 AUTO REFRESH AFTER UPLOAD
-        st.cache_data.clear()
-        st.rerun()
-
-# ========================= ADMIN =========================
-elif page == "🛠 Admin Panel" and username == "admin":
-
-    st.subheader("Admin Panel")
-
-    st.markdown("### ➕ Add User")
-
-    new_user = st.text_input("New Username")
-    new_pass = st.text_input("Password", type="password")
-
-    if st.button("Add User"):
-        try:
-            supabase.table("users").insert({
-                "username": new_user,
-                "password": new_pass
-            }).execute()
-            st.success("User added")
-        except:
-            st.error("User already exists")
-
-    st.markdown("### ❌ Remove User")
-
-    users = supabase.table("users").select("username").execute().data
-    user_list = [u["username"] for u in users if u["username"] != "admin"]
-
-    if user_list:
-        selected_user = st.selectbox("Select User", user_list)
-
-        if st.button("Delete User"):
-            supabase.table("users").delete().eq("username", selected_user).execute()
-            st.success("User deleted")
+        st.success(f"Uploaded {total_rows} rows")
