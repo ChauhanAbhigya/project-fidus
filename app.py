@@ -6,7 +6,7 @@ import math
 
 # ---------------- SUPABASE ----------------
 SUPABASE_URL = "https://eicwssbhjfvekaerjljm.supabase.co"
-SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVpY3dzc2JoamZ2ZWthZXJqbGptIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcyNzI1NTUsImV4cCI6MjA5Mjg0ODU1NX0.okPnbQrcKN6A2-Xj_99TgB47mtx9H6KO20asriBA19g".strip()
+SUPABASE_KEY = "YOUR_KEY_HERE".strip()
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
@@ -17,7 +17,8 @@ st.set_page_config(layout="wide")
 def load_parts():
     try:
         data = supabase.table("parts_table_v2").select("*").execute()
-        return pd.DataFrame(data.data or [])
+        df = pd.DataFrame(data.data or [])
+        return df
     except:
         return pd.DataFrame()
 
@@ -88,6 +89,12 @@ with col1:
 with col2:
     st.markdown("<div class='main-title'>📊 Price Lookup System</div>", unsafe_allow_html=True)
 
+# ========================= NORMALIZE =========================
+def norm(x):
+    if pd.isna(x):
+        return ""
+    return str(x).replace(".0","").replace(" ","").replace("-","").replace("/","").lstrip("0").strip().lower()
+
 # ========================= PRICE PAGE =========================
 if page == "📊 Price Lookup":
 
@@ -104,8 +111,11 @@ if page == "📊 Price Lookup":
         st.warning("⚠ No data found in database. Upload data first.")
         st.stop()
 
-    db_df["brand_clean"] = db_df["brand"].astype(str).str.strip().str.lower()
-    brand_list = sorted(db_df["brand_clean"].dropna().unique())
+    # CLEAN DATABASE (IMPORTANT FIX)
+    db_df["part_no"] = db_df["part_no"].astype(str).apply(norm)
+    db_df["brand"] = db_df["brand"].astype(str).str.strip().str.lower()
+
+    brand_list = sorted(db_df["brand"].dropna().unique())
 
     input_df = st.data_editor(
         st.session_state.input_table,
@@ -117,15 +127,6 @@ if page == "📊 Price Lookup":
         },
         key="input_editor"
     )
-
-    def norm(x):
-        if pd.isna(x):
-            return ""
-        x = str(x)
-        x = x.replace(".0","")
-        x = x.replace(" ","").replace("-","").replace("/","")
-        x = x.lstrip("0")
-        return x.strip().lower()
 
     if st.button("🔎 Fetch Prices"):
 
@@ -140,18 +141,18 @@ if page == "📊 Price Lookup":
             if not part:
                 continue
 
-            if pd.isna(qty) or qty == 0:
+            if pd.isna(qty) or qty <= 0:
                 qty = 1
 
             match = db_df[
                 (db_df["part_no"] == part) &
-                (db_df["brand_clean"] == brand)
+                (db_df["brand"] == brand)
             ]
 
             if not match.empty:
                 r = match.iloc[0]
-                price = float(r["price"])
-                desc = r["description"]
+                price = float(r.get("price", 0))
+                desc = r.get("description", "N/A")
             else:
                 price = 0
                 desc = "Item not found"
@@ -170,6 +171,7 @@ if page == "📊 Price Lookup":
 
     edited_df = st.session_state.table_data.copy()
 
+    # SAFE NUMERIC CONVERSION (FIX NAN ERROR)
     edited_df["Qty"] = pd.to_numeric(edited_df["Qty"], errors="coerce").fillna(0)
     edited_df["Price"] = pd.to_numeric(edited_df["Price"], errors="coerce").fillna(0)
     edited_df["Amount"] = edited_df["Qty"] * edited_df["Price"]
@@ -184,9 +186,9 @@ if page == "📊 Price Lookup":
                 "username": username,
                 "brand": row["Brand"],
                 "part_no": row["Part No"],
-                "qty": row["Qty"],
-                "price": row["Price"],
-                "amount": row["Amount"]
+                "qty": float(row["Qty"]),
+                "price": float(row["Price"]),
+                "amount": float(row["Amount"])
             }).execute()
 
         st.success("Saved successfully")
@@ -223,31 +225,21 @@ elif page == "📤 Upload Data" and username == "admin":
 
                 df = df[["part_no", "brand", "price", "description", "moq"]]
 
-                df["part_no"] = df["part_no"].astype(str).str.strip().str.lower()
+                df["part_no"] = df["part_no"].astype(str).apply(norm)
                 df["brand"] = df["brand"].astype(str).str.strip().str.lower()
                 df["price"] = pd.to_numeric(df["price"], errors="coerce").fillna(0)
 
                 df = df.dropna(subset=["part_no", "brand"])
 
-                # ---------------- FIX: REMOVE NaN / INF ----------------
+                # REMOVE NaN / INF (FIX IMPORTANT)
                 df = df.replace([float("inf"), -float("inf")], None)
                 df = df.where(pd.notnull(df), None)
 
                 data = df.to_dict(orient="records")
 
-                clean_data = []
-                for row in data:
-                    clean_row = {}
-                    for k, v in row.items():
-                        if pd.isna(v):
-                            clean_row[k] = None
-                        else:
-                            clean_row[k] = v
-                    clean_data.append(clean_row)
+                supabase.table("parts_table_v2").insert(data).execute()
 
-                supabase.table("parts_table_v2").insert(clean_data).execute()
-
-                total_rows += len(clean_data)
+                total_rows += len(data)
 
             except Exception as e:
                 st.error(f"❌ Error: {e}")
@@ -255,6 +247,10 @@ elif page == "📤 Upload Data" and username == "admin":
             progress.progress((i+1)/len(uploaded_files))
 
         st.success(f"Uploaded {total_rows} rows")
+
+        # AUTO REFRESH AFTER UPLOAD
+        st.cache_data.clear()
+        st.rerun()
 
 # ========================= ADMIN PANEL =========================
 elif page == "🛠 Admin Panel" and username == "admin":
