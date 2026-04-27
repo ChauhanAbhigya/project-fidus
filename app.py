@@ -229,7 +229,8 @@ elif page == "📤 Upload Data" and username == "admin":
 
                 df = df.dropna(subset=["part_no", "brand"])
 
-                # ---------------- FIX: CLEAN NaN / INF ----------------
+                # ---------------- FIX: REMOVE NaN / INF ----------------
+                df = df.replace([float("inf"), -float("inf")], None)
                 df = df.where(pd.notnull(df), None)
 
                 data = df.to_dict(orient="records")
@@ -238,9 +239,7 @@ elif page == "📤 Upload Data" and username == "admin":
                 for row in data:
                     clean_row = {}
                     for k, v in row.items():
-                        if v is None:
-                            clean_row[k] = None
-                        elif isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+                        if pd.isna(v):
                             clean_row[k] = None
                         else:
                             clean_row[k] = v
