@@ -5,7 +5,7 @@ import os
 
 # ---------------- SUPABASE ----------------
 SUPABASE_URL = "https://eicwssbhjfvekaerjljm.supabase.co"
-SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVpY3dzc2JoamZ2ZWthZXJqbGptIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcyNzI1NTUsImV4cCI6MjA5Mjg0ODU1NX0.okPnbQrcKN6A2-Xj_99TgB47mtx9H6KO20asriBA19g"
+SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
@@ -110,12 +110,13 @@ if page == "📊 Price Lookup":
         key="input_editor"
     )
 
+    # ---------------- FIXED NORM FUNCTION ----------------
     def norm(x):
         if pd.isna(x):
             return ""
         x = str(x)
         x = x.replace(".0","")
-        x = x.replace(" ","").replace("-","").replace("/","")  # ✅ FIX HERE
+        x = x.replace(" ","").replace("-","").replace("/","")
         x = x.lstrip("0")
         return x.strip().lower()
 
@@ -190,13 +191,16 @@ elif page == "📤 Upload Data" and username == "admin":
                     "item description": "description"
                 }, inplace=True)
 
-                df["part_no"] = df["part_no"].astype(str)\
-                    .str.replace(".0","")\
-                    .str.replace(" ","")\
-                    .str.replace("-","")\
-                    .str.replace("/", "")\  # ✅ FIX HERE
-                    .str.lstrip("0")\
+                df["part_no"] = (
+                    df["part_no"]
+                    .astype(str)
+                    .str.replace(".0","")
+                    .str.replace(" ","")
+                    .str.replace("-","")
+                    .str.replace("/", "")   # ✅ FIXED HERE (NO BACKSLASH)
+                    .str.lstrip("0")
                     .str.lower()
+                )
 
                 df["brand"] = df["brand"].astype(str).str.strip().str.lower()
                 df["price"] = pd.to_numeric(df["price"], errors="coerce").fillna(0)
@@ -215,3 +219,35 @@ elif page == "📤 Upload Data" and username == "admin":
             progress.progress((i+1)/len(uploaded_files))
 
         st.success(f"Uploaded {total_rows} rows")
+
+# ========================= ADMIN =========================
+elif page == "🛠 Admin Panel" and username == "admin":
+
+    st.subheader("Admin Panel")
+
+    st.markdown("### ➕ Add User")
+
+    new_user = st.text_input("New Username")
+    new_pass = st.text_input("Password", type="password")
+
+    if st.button("Add User"):
+        try:
+            supabase.table("users").insert({
+                "username": new_user,
+                "password": new_pass
+            }).execute()
+            st.success("User added")
+        except:
+            st.error("User already exists")
+
+    st.markdown("### ❌ Remove User")
+
+    users = supabase.table("users").select("username").execute().data
+    user_list = [u["username"] for u in users if u["username"] != "admin"]
+
+    if user_list:
+        selected_user = st.selectbox("Select User", user_list)
+
+        if st.button("Delete User"):
+            supabase.table("users").delete().eq("username", selected_user).execute()
+            st.success("User deleted")
