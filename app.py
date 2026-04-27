@@ -11,7 +11,7 @@ supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 st.set_page_config(layout="wide")
 
-# ---------------- CACHE (FIXED) ----------------
+# ---------------- CACHE ----------------
 @st.cache_data(ttl=0)
 def load_parts():
     try:
@@ -90,13 +90,6 @@ with col2:
 # ========================= PRICE PAGE =========================
 if page == "📊 Price Lookup":
 
-    # ---------------- REFRESH BUTTON (FIX 2) ----------------
-    col1, col2 = st.columns([1, 5])
-    with col1:
-        if st.button("🔄 Refresh Data"):
-            st.cache_data.clear()
-            st.rerun()
-
     db_df = load_parts()
 
     if db_df.empty:
@@ -121,7 +114,10 @@ if page == "📊 Price Lookup":
         if pd.isna(x):
             return ""
         x = str(x)
-        x = x.replace(".0","").replace(" ","").replace("-","").replace("/","")
+        x = x.replace(".0","", regex=False)\
+             .replace(" ","", regex=False)\
+             .replace("-","", regex=False)\
+             .replace("/","", regex=False)
         x = x.lstrip("0")
         return x.strip().lower()
 
@@ -236,11 +232,12 @@ elif page == "📤 Upload Data" and username == "admin":
                 if "moq" not in df.columns:
                     df["moq"] = ""
 
+                # ✅ FIXED STR.REPLACE ISSUE
                 df["part_no"] = df["part_no"].astype(str)\
-                    .str.replace(".0","")\
-                    .str.replace(" ","")\
-                    .str.replace("-","")\
-                    .str.replace("/")\
+                    .str.replace(".0","", regex=False)\
+                    .str.replace(" ","", regex=False)\
+                    .str.replace("-","", regex=False)\
+                    .str.replace("/","", regex=False)\
                     .str.lstrip("0")\
                     .str.lower()
 
