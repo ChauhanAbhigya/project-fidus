@@ -2,6 +2,9 @@ import streamlit as st
 import pandas as pd
 from db import get_connection, init_db
 import os
+if not os.path.exists("parts.db"):
+    import create_db
+    create_db.init_db()
 
 port = int(os.environ.get("PORT", 10000))
 
