@@ -192,47 +192,81 @@ if page == "📊 Price Lookup":
         st.success("Saved successfully")
 
 # ========================= UPLOAD PAGE =========================
+# ========================= UPLOAD PAGE =========================
 elif page == "📤 Upload Data" and username == "admin":
 
     st.title("📤 Upload Excel Data")
 
-    uploaded_file = st.file_uploader("Upload Excel", type=["xlsx"])
+    uploaded_files = st.file_uploader(
+        "Upload Excel Files",
+        type=["xlsx"],
+        accept_multiple_files=True
+    )
 
-    if uploaded_file:
-        df = pd.read_excel(uploaded_file, dtype=str)
+    if uploaded_files:
 
-        df.columns = df.columns.str.lower().str.strip()
+        total_rows = 0
+        total_files = len(uploaded_files)
 
-        df.rename(columns={
-            "part no": "part_no",
-            "price [eur]": "price",
-            "item description": "description"
-        }, inplace=True)
-
-        if "description" not in df.columns:
-            df["description"] = "Not Available"
-
-        if "moq" not in df.columns:
-            df["moq"] = ""
-
-        df["part_no"] = df["part_no"].astype(str).str.lower()
-        df["brand"] = df["brand"].astype(str).str.strip().str.lower()
-        df["price"] = pd.to_numeric(df["price"], errors="coerce").fillna(0)
-
-        df = df[["brand","part_no","price","description","moq"]]
-        df = df.drop_duplicates(subset=["brand","part_no"])
-
-        data = df.to_dict(orient="records")
-
-        BATCH_SIZE = 500
         progress = st.progress(0)
+        file_progress = 0
 
-        for i in range(0, len(data), BATCH_SIZE):
-            batch = data[i:i+BATCH_SIZE]
-            supabase.table("parts_table").insert(batch).execute()
-            progress.progress(min((i + BATCH_SIZE)/len(data), 1.0))
+        for uploaded_file in uploaded_files:
 
-        st.success(f"✅ Uploaded {len(data)} rows successfully!")
+            try:
+                df = pd.read_excel(uploaded_file, dtype=str)
+
+                # ---------------- CLEANING ----------------
+                df.columns = df.columns.str.lower().str.strip()
+
+                df.rename(columns={
+                    "part no": "part_no",
+                    "price [eur]": "price",
+                    "item description": "description"
+                }, inplace=True)
+
+                if "description" not in df.columns:
+                    df["description"] = "Not Available"
+
+                if "moq" not in df.columns:
+                    df["moq"] = ""
+
+                df["part_no"] = df["part_no"].astype(str)\
+                    .str.replace(".0","")\
+                    .str.replace(" ","")\
+                    .str.replace("-","")\
+                    .str.replace("/","")\
+                    .str.lstrip("0")\
+                    .str.lower()
+
+                df["brand"] = df["brand"].astype(str).str.strip().str.lower()
+                df["price"] = pd.to_numeric(df["price"], errors="coerce").fillna(0)
+
+                df = df[["brand","part_no","price","description","moq"]]
+
+                # 🔥 REMOVE DUPLICATES
+                df = df.drop_duplicates(subset=["brand","part_no"])
+
+                # ---------------- CONVERT ----------------
+                data = df.to_dict(orient="records")
+
+                # ---------------- CHUNK UPLOAD ----------------
+                BATCH_SIZE = 500
+
+                for i in range(0, len(data), BATCH_SIZE):
+                    batch = data[i:i+BATCH_SIZE]
+                    supabase.table("parts_table").insert(batch).execute()
+
+                total_rows += len(data)
+
+            except Exception as e:
+                st.error(f"❌ Error in {uploaded_file.name}: {e}")
+
+            # ---------------- PROGRESS ----------------
+            file_progress += 1
+            progress.progress(file_progress / total_files)
+
+        st.success(f"✅ Uploaded {total_rows} rows from {total_files} files successfully!")
 
 # ========================= ADMIN =========================
 elif page == "🛠 Admin Panel" and username == "admin":
