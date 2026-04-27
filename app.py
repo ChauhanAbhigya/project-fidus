@@ -12,10 +12,10 @@ supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 st.set_page_config(layout="wide")
 
 # ---------------- CACHE ----------------
-@st.cache_data
+@st.cache_data(ttl=0)
 def load_parts():
     try:
-        data = supabase.table("parts_table").select("*").execute()
+        data = supabase.table("parts_table_v2").select("*").execute()
         return pd.DataFrame(data.data or [])
     except:
         return pd.DataFrame()
@@ -211,10 +211,8 @@ elif page == "📤 Upload Data" and username == "admin":
             try:
                 df = pd.read_excel(uploaded_file, dtype=str)
 
-                # ---------------- CLEAN COLUMN NAMES ----------------
                 df.columns = df.columns.str.strip().str.lower()
 
-                # ---------------- FIX COLUMN MAPPING ----------------
                 df.rename(columns={
                     "part no": "part_no",
                     "price [eur]": "price",
@@ -222,19 +220,17 @@ elif page == "📤 Upload Data" and username == "admin":
                     "moq": "moq"
                 }, inplace=True)
 
-                # ---------------- KEEP ONLY SUPABASE COLUMNS ----------------
                 df = df[["part_no", "brand", "price", "description", "moq"]]
 
-                # ---------------- CLEAN DATA ----------------
                 df["part_no"] = df["part_no"].astype(str).str.strip().str.lower()
                 df["brand"] = df["brand"].astype(str).str.strip().str.lower()
                 df["price"] = pd.to_numeric(df["price"], errors="coerce").fillna(0)
 
                 df = df.dropna(subset=["part_no", "brand"])
 
-                # ---------------- UPLOAD ----------------
                 data = df.to_dict(orient="records")
-                supabase.table("parts_table").insert(data).execute()
+
+                supabase.table("parts_table_v2").insert(data).execute()
 
                 total_rows += len(data)
 
@@ -267,5 +263,7 @@ elif page == "🛠 Admin Panel" and username == "admin":
         selected_user = st.selectbox("Select User", user_list)
 
         if st.button("Delete User"):
+            supabase.table("users").delete().eq("username", selected_user).execute()
+            st.success("User deleted")
             supabase.table("users").delete().eq("username", selected_user).execute()
             st.success("User deleted")
