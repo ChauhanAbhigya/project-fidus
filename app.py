@@ -11,7 +11,7 @@ supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 st.set_page_config(layout="wide")
 
-# ---------------- CACHE (FIXED) ----------------
+# ---------------- CACHE ----------------
 @st.cache_data
 def load_parts():
     try:
@@ -90,7 +90,6 @@ with col2:
 # ========================= PRICE PAGE =========================
 if page == "📊 Price Lookup":
 
-    # 🔄 REFRESH BUTTON (UNCHANGED)
     col_title, col_refresh = st.columns([10, 1])
 
     with col_refresh:
@@ -212,32 +211,29 @@ elif page == "📤 Upload Data" and username == "admin":
             try:
                 df = pd.read_excel(uploaded_file, dtype=str)
 
-                df.columns = df.columns.str.lower().str.strip()
+                # ---------------- CLEAN COLUMN NAMES ----------------
+                df.columns = df.columns.str.strip().str.lower()
 
+                # ---------------- FIX COLUMN MAPPING ----------------
                 df.rename(columns={
                     "part no": "part_no",
                     "price [eur]": "price",
-                    "item description": "description"
+                    "item description": "description",
+                    "moq": "moq"
                 }, inplace=True)
 
-                df["part_no"] = (
-                    df["part_no"]
-                    .astype(str)
-                    .str.replace(".0","")
-                    .str.replace(" ","")
-                    .str.replace("-","")
-                    .str.replace("/", "")
-                    .str.lstrip("0")
-                    .str.lower()
-                )
+                # ---------------- KEEP ONLY SUPABASE COLUMNS ----------------
+                df = df[["part_no", "brand", "price", "description", "moq"]]
 
+                # ---------------- CLEAN DATA ----------------
+                df["part_no"] = df["part_no"].astype(str).str.strip().str.lower()
                 df["brand"] = df["brand"].astype(str).str.strip().str.lower()
                 df["price"] = pd.to_numeric(df["price"], errors="coerce").fillna(0)
 
-                df = df[["brand","part_no","price","description"]]
+                df = df.dropna(subset=["part_no", "brand"])
 
+                # ---------------- UPLOAD ----------------
                 data = df.to_dict(orient="records")
-
                 supabase.table("parts_table").insert(data).execute()
 
                 total_rows += len(data)
@@ -248,10 +244,6 @@ elif page == "📤 Upload Data" and username == "admin":
             progress.progress((i+1)/len(uploaded_files))
 
         st.success(f"Uploaded {total_rows} rows")
-
-        # 🔥 FIXED REFRESH LOGIC
-        st.cache_data.clear()
-        st.rerun()
 
 # ========================= ADMIN PANEL =========================
 elif page == "🛠 Admin Panel" and username == "admin":
