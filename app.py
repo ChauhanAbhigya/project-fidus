@@ -11,8 +11,8 @@ supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 st.set_page_config(layout="wide")
 
-# ---------------- CACHE ----------------
-@st.cache_data(ttl=0)
+# ---------------- CACHE (FIXED) ----------------
+@st.cache_data
 def load_parts():
     try:
         data = supabase.table("parts_table").select("*").execute()
@@ -90,7 +90,7 @@ with col2:
 # ========================= PRICE PAGE =========================
 if page == "📊 Price Lookup":
 
-    # 🔄 REFRESH BUTTON (RESTORED)
+    # 🔄 REFRESH BUTTON (UNCHANGED)
     col_title, col_refresh = st.columns([10, 1])
 
     with col_refresh:
@@ -248,6 +248,10 @@ elif page == "📤 Upload Data" and username == "admin":
             progress.progress((i+1)/len(uploaded_files))
 
         st.success(f"Uploaded {total_rows} rows")
+
+        # 🔥 FIXED REFRESH LOGIC
+        st.cache_data.clear()
+        st.rerun()
 
 # ========================= ADMIN PANEL =========================
 elif page == "🛠 Admin Panel" and username == "admin":
