@@ -242,12 +242,17 @@ elif page == "📤 Upload Data" and username == "admin":
                 df["brand"] = df["brand"].astype(str).str.strip().str.lower()
                 df["price"] = pd.to_numeric(df["price"], errors="coerce").fillna(0)
 
+                 # 🔥 FIX FOR SUPABASE JSON ERROR
+                df = df.where(pd.notnull(df), None)
+                df = df.replace({float("nan"): None, float("inf"): None, -float("inf"): None})
+
                 df = df[["brand","part_no","price","description","moq"]]
 
                 # 🔥 REMOVE DUPLICATES
                 df = df.drop_duplicates(subset=["brand","part_no"])
 
                 # ---------------- CONVERT ----------------
+                df = df.astype(object).where(pd.notnull(df), None)
                 data = df.to_dict(orient="records")
 
                 # ---------------- CHUNK UPLOAD ----------------
