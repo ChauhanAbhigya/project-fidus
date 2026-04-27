@@ -5,22 +5,6 @@ import os
 DB_NAME = "parts.db"
 FOLDER = "data_files"
 
-conn = sqlite3.connect(DB_NAME)
-cursor = conn.cursor()
-
-cursor.execute("DROP TABLE IF EXISTS parts_table")
-
-cursor.execute("""
-CREATE TABLE parts_table (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    brand TEXT,
-    part_no TEXT,
-    price REAL,
-    description TEXT,
-    moq TEXT
-)
-""")
-
 def clean_part(x):
     if pd.isna(x):
         return ""
@@ -36,61 +20,106 @@ def clean_part(x):
 
     return x.lower()
 
-for file in os.listdir(FOLDER):
 
-    if file.endswith(".xlsx") and not file.startswith("~$"):
+def init_db():
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
 
-        path = os.path.join(FOLDER, file)
+    # ---------------- PARTS TABLE ----------------
+    cursor.execute("DROP TABLE IF EXISTS parts_table")
 
-        try:
-            df = pd.read_excel(path, dtype=str)
+    cursor.execute("""
+    CREATE TABLE parts_table (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        brand TEXT,
+        part_no TEXT,
+        price REAL,
+        description TEXT,
+        moq TEXT
+    )
+    """)
 
-            df.columns = df.columns.str.lower().str.strip()
+    # ---------------- USERS TABLE (LOGIN FIX) ----------------
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT UNIQUE,
+        password TEXT
+    )
+    """)
 
-            df.rename(columns={
-                "part no": "part_no",
-                "brand": "brand",
-                "price [eur]": "price",
-                "item description": "description",
-                "moq": "moq"
-            }, inplace=True)
+    # Insert default admin
+    cursor.execute("SELECT * FROM users WHERE username='admin'")
+    if not cursor.fetchone():
+        cursor.execute(
+            "INSERT INTO users (username, password) VALUES (?, ?)",
+            ("admin", "1234")
+        )
 
-            if "part_no" not in df.columns or "price" not in df.columns:
-                print("Skipping:", file)
-                continue
+    # ---------------- OFFER ITEMS TABLE ----------------
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS offer_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT,
+        brand TEXT,
+        part_no TEXT,
+        qty REAL,
+        price REAL,
+        amount REAL
+    )
+    """)
 
-            if "description" not in df.columns:
-                df["description"] = "Not Available"
+    # ---------------- LOAD EXCEL DATA ----------------
+    if os.path.exists(FOLDER):
+        for file in os.listdir(FOLDER):
 
-            if "moq" not in df.columns:
-                df["moq"] = None
+            if file.endswith(".xlsx") and not file.startswith("~$"):
 
-            df["part_no"] = df["part_no"].apply(clean_part)
-            df["brand"] = df["brand"].astype(str).str.strip().str.lower()
-            df["price"] = pd.to_numeric(df["price"], errors="coerce").fillna(0)
+                path = os.path.join(FOLDER, file)
 
-            df = df[["brand","part_no","price","description","moq"]]
-            df = df[df["part_no"] != ""]
+                try:
+                    df = pd.read_excel(path, dtype=str)
 
-            df.to_sql("parts_table", conn, if_exists="append", index=False)
+                    df.columns = df.columns.str.lower().str.strip()
 
-            print("Loaded:", file)
+                    df.rename(columns={
+                        "part no": "part_no",
+                        "brand": "brand",
+                        "price [eur]": "price",
+                        "item description": "description",
+                        "moq": "moq"
+                    }, inplace=True)
 
-        except Exception as e:
-            print("Error:", file, e)
-            cursor.execute("""
-CREATE TABLE IF NOT EXISTS offer_items (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT,
-    brand TEXT,
-    part_no TEXT,
-    qty REAL,
-    price REAL,
-    amount REAL
-)
-""")
+                    if "part_no" not in df.columns or "price" not in df.columns:
+                        print("Skipping:", file)
+                        continue
 
-conn.commit()
-conn.close()
+                    if "description" not in df.columns:
+                        df["description"] = "Not Available"
 
-print("✅ DB READY")
+                    if "moq" not in df.columns:
+                        df["moq"] = None
+
+                    df["part_no"] = df["part_no"].apply(clean_part)
+                    df["brand"] = df["brand"].astype(str).str.strip().str.lower()
+                    df["price"] = pd.to_numeric(df["price"], errors="coerce").fillna(0)
+
+                    df = df[["brand","part_no","price","description","moq"]]
+                    df = df[df["part_no"] != ""]
+
+                    df.to_sql("parts_table", conn, if_exists="append", index=False)
+
+                    print("Loaded:", file)
+
+                except Exception as e:
+                    print("Error:", file, e)
+
+    conn.commit()
+    conn.close()
+
+    print("✅ DB READY")
+
+
+# Run manually if needed
+if __name__ == "__main__":
+    init_db()
