@@ -11,12 +11,12 @@ supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 st.set_page_config(layout="wide")
 
-# ---------------- CACHE ----------------
-@st.cache_data
+# ---------------- CACHE (FIXED) ----------------
+@st.cache_data(ttl=0)
 def load_parts():
     try:
         data = supabase.table("parts_table").select("*").execute()
-        return pd.DataFrame(data.data)
+        return pd.DataFrame(data.data or [])
     except:
         return pd.DataFrame()
 
@@ -68,7 +68,7 @@ with st.sidebar:
     pages = ["📊 Price Lookup"]
 
     if username == "admin":
-        pages.append("📤 Upload Data")   # ✅ ADDED
+        pages.append("📤 Upload Data")
         pages.append("🛠 Admin Panel")
 
     page = st.radio("Menu", pages)
@@ -89,6 +89,13 @@ with col2:
 
 # ========================= PRICE PAGE =========================
 if page == "📊 Price Lookup":
+
+    # ---------------- REFRESH BUTTON (FIX 2) ----------------
+    col1, col2 = st.columns([1, 5])
+    with col1:
+        if st.button("🔄 Refresh Data"):
+            st.cache_data.clear()
+            st.rerun()
 
     db_df = load_parts()
 
@@ -192,7 +199,6 @@ if page == "📊 Price Lookup":
         st.success("Saved successfully")
 
 # ========================= UPLOAD PAGE =========================
-# ========================= UPLOAD PAGE =========================
 elif page == "📤 Upload Data" and username == "admin":
 
     st.title("📤 Upload Excel Data")
@@ -216,7 +222,6 @@ elif page == "📤 Upload Data" and username == "admin":
             try:
                 df = pd.read_excel(uploaded_file, dtype=str)
 
-                # ---------------- CLEANING ----------------
                 df.columns = df.columns.str.lower().str.strip()
 
                 df.rename(columns={
@@ -235,27 +240,23 @@ elif page == "📤 Upload Data" and username == "admin":
                     .str.replace(".0","")\
                     .str.replace(" ","")\
                     .str.replace("-","")\
-                    .str.replace("/","")\
+                    .str.replace("/")\
                     .str.lstrip("0")\
                     .str.lower()
 
                 df["brand"] = df["brand"].astype(str).str.strip().str.lower()
                 df["price"] = pd.to_numeric(df["price"], errors="coerce").fillna(0)
 
-                 # 🔥 FIX FOR SUPABASE JSON ERROR
                 df = df.where(pd.notnull(df), None)
-                df = df.replace({float("nan"): None, float("inf"): None, -float("inf"): None})
 
                 df = df[["brand","part_no","price","description","moq"]]
 
-                # 🔥 REMOVE DUPLICATES
                 df = df.drop_duplicates(subset=["brand","part_no"])
 
-                # ---------------- CONVERT ----------------
                 df = df.astype(object).where(pd.notnull(df), None)
+
                 data = df.to_dict(orient="records")
 
-                # ---------------- CHUNK UPLOAD ----------------
                 BATCH_SIZE = 500
 
                 for i in range(0, len(data), BATCH_SIZE):
@@ -267,7 +268,6 @@ elif page == "📤 Upload Data" and username == "admin":
             except Exception as e:
                 st.error(f"❌ Error in {uploaded_file.name}: {e}")
 
-            # ---------------- PROGRESS ----------------
             file_progress += 1
             progress.progress(file_progress / total_files)
 
