@@ -5,19 +5,20 @@ import os
 
 # ---------------- SUPABASE ----------------
 SUPABASE_URL = "https://eicwssbhjfvekaerjljm.supabase.co"
-SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVpY3dzc2JoamZ2ZWthZXJqbGptIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcyNzI1NTUsImV4cCI6MjA5Mjg0ODU1NX0.okPnbQrcKN6A2-Xj_99TgB47mtx9H6KO20asriBA19g"
+SUPABASE_KEY = "YOUR_KEY"
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-
-port = int(os.environ.get("PORT", 10000))
 
 st.set_page_config(layout="wide")
 
 # ---------------- CACHE ----------------
 @st.cache_data
 def load_parts():
-    data = supabase.table("parts_table").select("*").execute()
-    return pd.DataFrame(data.data)
+    try:
+        data = supabase.table("parts_table").select("*").execute()
+        return pd.DataFrame(data.data)
+    except:
+        return pd.DataFrame()
 
 # ---------------- SESSION STATE ----------------
 if "table_data" not in st.session_state:
@@ -65,7 +66,9 @@ with st.sidebar:
     st.markdown(f"👤 Logged in as: **{username}**")
 
     pages = ["📊 Price Lookup"]
+
     if username == "admin":
+        pages.append("📤 Upload Data")   # ✅ ADDED
         pages.append("🛠 Admin Panel")
 
     page = st.radio("Menu", pages)
@@ -94,7 +97,6 @@ if page == "📊 Price Lookup":
         st.stop()
 
     db_df["brand_clean"] = db_df["brand"].astype(str).str.strip().str.lower()
-
     brand_list = sorted(db_df["brand_clean"].dropna().unique())
 
     input_df = st.data_editor(
@@ -188,6 +190,49 @@ if page == "📊 Price Lookup":
             }).execute()
 
         st.success("Saved successfully")
+
+# ========================= UPLOAD PAGE =========================
+elif page == "📤 Upload Data" and username == "admin":
+
+    st.title("📤 Upload Excel Data")
+
+    uploaded_file = st.file_uploader("Upload Excel", type=["xlsx"])
+
+    if uploaded_file:
+        df = pd.read_excel(uploaded_file, dtype=str)
+
+        df.columns = df.columns.str.lower().str.strip()
+
+        df.rename(columns={
+            "part no": "part_no",
+            "price [eur]": "price",
+            "item description": "description"
+        }, inplace=True)
+
+        if "description" not in df.columns:
+            df["description"] = "Not Available"
+
+        if "moq" not in df.columns:
+            df["moq"] = ""
+
+        df["part_no"] = df["part_no"].astype(str).str.lower()
+        df["brand"] = df["brand"].astype(str).str.strip().str.lower()
+        df["price"] = pd.to_numeric(df["price"], errors="coerce").fillna(0)
+
+        df = df[["brand","part_no","price","description","moq"]]
+        df = df.drop_duplicates(subset=["brand","part_no"])
+
+        data = df.to_dict(orient="records")
+
+        BATCH_SIZE = 500
+        progress = st.progress(0)
+
+        for i in range(0, len(data), BATCH_SIZE):
+            batch = data[i:i+BATCH_SIZE]
+            supabase.table("parts_table").insert(batch).execute()
+            progress.progress(min((i + BATCH_SIZE)/len(data), 1.0))
+
+        st.success(f"✅ Uploaded {len(data)} rows successfully!")
 
 # ========================= ADMIN =========================
 elif page == "🛠 Admin Panel" and username == "admin":
