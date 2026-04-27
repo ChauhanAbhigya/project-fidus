@@ -90,6 +90,14 @@ with col2:
 # ========================= PRICE PAGE =========================
 if page == "📊 Price Lookup":
 
+    # 🔥 PROFESSIONAL REFRESH BUTTON
+    col_title, col_refresh = st.columns([10, 1])
+
+    with col_refresh:
+        if st.button("🔄"):
+            st.cache_data.clear()
+            st.rerun()
+
     db_df = load_parts()
 
     if db_df.empty:
@@ -110,14 +118,13 @@ if page == "📊 Price Lookup":
         key="input_editor"
     )
 
+    # ---------------- FIXED NORM FUNCTION ----------------
     def norm(x):
         if pd.isna(x):
             return ""
         x = str(x)
-        x = x.replace(".0","", regex=False)\
-             .replace(" ","", regex=False)\
-             .replace("-","", regex=False)\
-             .replace("/","", regex=False)
+        x = x.replace(".0","")
+        x = x.replace(" ","").replace("-","").replace("/","")
         x = x.lstrip("0")
         return x.strip().lower()
 
@@ -232,12 +239,11 @@ elif page == "📤 Upload Data" and username == "admin":
                 if "moq" not in df.columns:
                     df["moq"] = ""
 
-                # ✅ FIXED STR.REPLACE ISSUE
                 df["part_no"] = df["part_no"].astype(str)\
-                    .str.replace(".0","", regex=False)\
-                    .str.replace(" ","", regex=False)\
-                    .str.replace("-","", regex=False)\
-                    .str.replace("/","", regex=False)\
+                    .str.replace(".0","")\
+                    .str.replace(" ","")\
+                    .str.replace("-","")\
+                    .str.replace("/")\
                     .str.lstrip("0")\
                     .str.lower()
 
@@ -269,6 +275,10 @@ elif page == "📤 Upload Data" and username == "admin":
             progress.progress(file_progress / total_files)
 
         st.success(f"✅ Uploaded {total_rows} rows from {total_files} files successfully!")
+
+        # 🔥 AUTO REFRESH AFTER UPLOAD
+        st.cache_data.clear()
+        st.rerun()
 
 # ========================= ADMIN =========================
 elif page == "🛠 Admin Panel" and username == "admin":
