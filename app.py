@@ -12,26 +12,44 @@ supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 st.set_page_config(layout="wide")
 
-# ---------------- UI ----------------
+# ---------------- PREMIUM LIGHT UI ----------------
 st.markdown("""
 <style>
 body {
-    background: linear-gradient(135deg, #e3f2fd, #fce4ec);
+    background: linear-gradient(135deg, #eef2ff, #fdf2f8);
+}
+.block-container {
+    background: linear-gradient(135deg, #ffffff, #f8fafc);
+    padding: 20px;
+    border-radius: 16px;
+    box-shadow: 0 6px 25px rgba(0,0,0,0.05);
+}
+section[data-testid="stSidebar"] {
+    background: linear-gradient(180deg, #6366f1, #818cf8);
+}
+section[data-testid="stSidebar"] * {
+    color: white !important;
 }
 .main-title {
-    font-size: 32px;
+    font-size: 34px;
     font-weight: 700;
-    color: #1a237e;
+    color: #1e293b;
 }
 .login-box {
-    width: 380px;
+    width: 400px;
     margin: auto;
     margin-top: 120px;
-    padding: 30px;
-    background: linear-gradient(135deg, #ffffff, #f3f6ff);
-    border-radius: 14px;
+    padding: 35px;
+    background: linear-gradient(135deg, #ffffff, #eef2ff);
+    border-radius: 16px;
     box-shadow: 0 10px 40px rgba(0,0,0,0.08);
     text-align: center;
+}
+.stButton>button {
+    background: linear-gradient(90deg, #6366f1, #3b82f6);
+    color: white;
+    border-radius: 8px;
+    height: 40px;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -44,6 +62,17 @@ def load_parts():
         return pd.DataFrame(data.data or [])
     except:
         return pd.DataFrame()
+
+# 🔥 NEW: ALWAYS FRESH BRANDS (NO CACHE)
+def load_brands():
+    try:
+        data = supabase.table("parts_table").select("brand").execute()
+        df = pd.DataFrame(data.data or [])
+        if df.empty:
+            return []
+        return sorted(set(df["brand"].astype(str).str.strip().str.lower()))
+    except:
+        return []
 
 # ---------------- SESSION ----------------
 if "table_data" not in st.session_state:
@@ -73,7 +102,7 @@ if st.session_state.user is None:
     st.markdown("<div class='login-box'>", unsafe_allow_html=True)
 
     if os.path.exists("logo.png"):
-        st.image("logo.png", width=120)
+        st.image("logo.png", width=130)
 
     st.markdown("### 🔐 Login")
 
@@ -98,7 +127,7 @@ username = user["username"]
 with st.sidebar:
     st.markdown(f"👤 Logged in: **{username}**")
 
-    pages = ["📊 Price Lookup", "📄 Saved Offers"]
+    pages = ["📊 Price Lookup"]
     if username == "admin":
         pages += ["📤 Upload Data", "🛠 Admin Panel"]
 
@@ -117,21 +146,11 @@ def norm(x):
         return ""
     return str(x).replace(".0","").replace(" ","").replace("-","").replace("/","").strip().lower()
 
-def safe(v, is_int=False):
-    try:
-        if v is None:
-            return None
-        if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
-            return None
-        return int(float(v)) if is_int else float(v)
-    except:
-        return v
-
 # ---------------- PRICE PAGE ----------------
 if page == "📊 Price Lookup":
 
-    colr1, colr2 = st.columns([6,1])
-    with colr2:
+    col1, col2 = st.columns([6,1])
+    with col2:
         if st.button("🔄 Refresh"):
             load_parts.clear()
             st.cache_data.clear()
@@ -144,9 +163,10 @@ if page == "📊 Price Lookup":
         st.stop()
 
     db_df["part_no"] = db_df["part_no"].astype(str).apply(norm)
-    db_df["brand"] = db_df["brand"].astype(str).str.lower()
+    db_df["brand"] = db_df["brand"].astype(str).str.strip().str.lower()
 
-    brand_list = sorted(db_df["brand"].dropna().unique())
+    # 🔥 FIXED BRAND DROPDOWN
+    brand_list = load_brands()
 
     input_df = st.data_editor(
         st.session_state.input_table,
@@ -202,23 +222,13 @@ if page == "📊 Price Lookup":
         st.dataframe(df, use_container_width=True)
         st.markdown(f"### 💰 Total: € {df['Amount'].sum():.2f}")
 
-# ---------------- SAVED OFFERS ----------------
-elif page == "📄 Saved Offers":
-
-    data = supabase.table("offer_items").select("*").execute().data
-    df = pd.DataFrame(data or [])
-
-    if df.empty:
-        st.info("No saved offers found")
-    else:
-        st.dataframe(df, use_container_width=True)
-
 # ---------------- UPLOAD ----------------
 elif page == "📤 Upload Data" and username == "admin":
 
     uploaded = st.file_uploader("Upload Excel", type=["xlsx"])
 
     if uploaded:
+
         df = pd.read_excel(uploaded, dtype=str)
         df.columns = df.columns.str.strip().str.lower()
 
@@ -250,6 +260,7 @@ elif page == "📤 Upload Data" and username == "admin":
             supabase.table("parts_table").insert(clean_data[i:i+200]).execute()
 
         st.success(f"Uploaded {len(clean_data)} rows")
+
         load_parts.clear()
         st.cache_data.clear()
         st.rerun()
