@@ -84,11 +84,37 @@ with col1:
 with col2:
     st.markdown("<div class='main-title'>📊 Price Lookup System</div>", unsafe_allow_html=True)
 
-# ---------------- FIX NORMALIZER ----------------
+# ---------------- SAFE NORMALIZER ----------------
 def norm(x):
     if x is None or (isinstance(x, float) and math.isnan(x)):
         return ""
     return str(x).replace(".0","").replace(" ","").replace("-","").replace("/","").lstrip("0").strip().lower()
+
+# ---------------- SAFE SUPABASE CLEAN (FIX) ----------------
+def safe_value(v):
+    if v is None:
+        return None
+    if isinstance(v, float):
+        if math.isnan(v) or math.isinf(v):
+            return None
+    if pd.isna(v):
+        return None
+    return v
+
+def clean_for_supabase(df):
+    df = df.copy()
+
+    df = df.replace([float("inf"), -float("inf")], None)
+    df = df.where(pd.notnull(df), None)
+
+    records = []
+    for _, row in df.iterrows():
+        clean_row = {}
+        for k, v in row.items():
+            clean_row[k] = safe_value(v)
+        records.append(clean_row)
+
+    return records
 
 # ========================= PRICE PAGE =========================
 if page == "📊 Price Lookup":
@@ -106,7 +132,6 @@ if page == "📊 Price Lookup":
         st.warning("⚠ No data found in database. Upload data first.")
         st.stop()
 
-    # FIX DATABASE CLEANING
     db_df["part_no"] = db_df["part_no"].astype(str).apply(norm)
     db_df["brand"] = db_df["brand"].astype(str).str.strip().str.lower()
 
@@ -131,7 +156,6 @@ if page == "📊 Price Lookup":
 
             part = norm(row.get("Part No",""))
             brand = str(row.get("Brand","")).strip().lower()
-
             qty = pd.to_numeric(row.get("Qty"), errors="coerce")
 
             if pd.isna(qty) or qty <= 0:
@@ -176,25 +200,22 @@ if page == "📊 Price Lookup":
         safe_rows = []
 
         for _, row in df.iterrows():
-
-            # FIX: REMOVE NaN BEFORE SUPABASE
             safe_rows.append({
                 "username": username,
                 "brand": str(row["Brand"]),
                 "part_no": str(row["Part No"]),
-                "qty": int(float(row["Qty"] or 0)),
+                "qty": float(row["Qty"] or 0),
                 "price": float(row["Price"] or 0),
                 "amount": float(row["Amount"] or 0)
             })
 
-        # FIX: BATCH INSERT (prevents timeout)
         BATCH = 50
         for i in range(0, len(safe_rows), BATCH):
             supabase.table("offer_items").insert(safe_rows[i:i+BATCH]).execute()
 
         st.success("Saved successfully")
 
-# ========================= UPLOAD PAGE =========================
+# ========================= UPLOAD PAGE (FIXED ONLY ERROR) =========================
 elif page == "📤 Upload Data" and username == "admin":
 
     st.title("📤 Upload Excel Data")
@@ -230,19 +251,19 @@ elif page == "📤 Upload Data" and username == "admin":
                 df["brand"] = df["brand"].astype(str).str.lower().str.strip()
 
                 df["price"] = pd.to_numeric(df["price"], errors="coerce").fillna(0)
-                df["moq"] = pd.to_numeric(df["moq"], errors="coerce").fillna(1).astype(int)
+                df["moq"] = pd.to_numeric(df["moq"], errors="coerce").fillna(1)
 
                 df = df.dropna(subset=["part_no", "brand"])
 
-                df = df.replace([float("inf"), -float("inf")], 0)
+                # FINAL FIX (IMPORTANT)
+                records = clean_for_supabase(df)
 
-                data = df.to_dict(orient="records")
+                if len(records) > 0:
+                    BATCH = 100
+                    for j in range(0, len(records), BATCH):
+                        supabase.table("parts_table").insert(records[j:j+BATCH]).execute()
 
-                # FIX: BATCH INSERT
-                for j in range(0, len(data), 100):
-                    supabase.table("parts_table").insert(data[j:j+100]).execute()
-
-                total_rows += len(data)
+                total_rows += len(records)
 
             except Exception as e:
                 st.error(f"❌ Error: {e}")
