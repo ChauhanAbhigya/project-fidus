@@ -6,244 +6,225 @@ import math
 
 # ---------------- SUPABASE ----------------
 SUPABASE_URL = "https://eicwssbhjfvekaerjljm.supabase.co"
-SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVpY3dzc2JoamZ2ZWthZXJqbGptIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcyNzI1NTUsImV4cCI6MjA5Mjg0ODU1NX0.okPnbQrcKN6A2-Xj_99TgB47mtx9H6KO20asriBA19g"
+SUPABASE_KEY = "YOUR_KEY_HERE"
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-st.set_page_config(layout="wide")
+st.set_page_config(page_title="Price System", layout="wide")
 
-# ---------------- UI STYLE ONLY ----------------
+# ---------------- PREMIUM LIGHT UI ----------------
 st.markdown("""
 <style>
-.stApp {
-    background: linear-gradient(135deg, #0f172a, #1e293b, #0f172a);
-    color: white;
-    font-family: 'Segoe UI';
+body {
+    background: linear-gradient(135deg, #f6f9ff, #eef3ff);
 }
 
 .main-title {
     font-size: 32px;
     font-weight: 700;
-    background: linear-gradient(90deg, #00c6ff, #0072ff);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
+    color: #1a237e;
 }
 
-.stButton>button {
-    background: linear-gradient(90deg, #00c6ff, #0072ff);
-    color: white;
-    border-radius: 10px;
-    font-weight: 600;
+.card {
+    background: white;
+    padding: 15px;
+    border-radius: 12px;
+    box-shadow: 0px 4px 20px rgba(0,0,0,0.05);
 }
 </style>
 """, unsafe_allow_html=True)
 
-# ---------------- CACHE ----------------
+# ---------------- LOAD DATA ----------------
 @st.cache_data(ttl=0)
 def load_parts():
-    data = supabase.table("parts_table").select("*").execute()
-    return pd.DataFrame(data.data or [])
+    try:
+        res = supabase.table("parts_table").select("*").execute()
+        return pd.DataFrame(res.data or [])
+    except:
+        return pd.DataFrame()
 
 # ---------------- SESSION ----------------
 if "table_data" not in st.session_state:
-    st.session_state.table_data = pd.DataFrame(columns=["Brand","Part No","Description","Qty","Price","Amount"])
+    st.session_state.table_data = pd.DataFrame()
 
 if "input_table" not in st.session_state:
-    st.session_state.input_table = pd.DataFrame(columns=["Brand","Part No","Qty"])
-
-# ---------------- LOGIN ----------------
-if "user" not in st.session_state:
-    st.session_state.user = None
-
-def login(u, p):
-    res = supabase.table("users").select("*").eq("username", u).eq("password", p).execute()
-    return res.data[0] if res.data else None
-
-if st.session_state.user is None:
-    st.title("🔐 Login")
-    u = st.text_input("Username")
-    p = st.text_input("Password", type="password")
-
-    if st.button("Login"):
-        user = login(u, p)
-        if user:
-            st.session_state.user = user
-            st.rerun()
-        else:
-            st.error("Invalid login")
-    st.stop()
-
-username = st.session_state.user["username"]
-
-# ---------------- SIDEBAR ----------------
-with st.sidebar:
-    st.markdown(f"👤 {username}")
-
-    pages = ["📊 Price Lookup"]
-    if username == "admin":
-        pages += ["📤 Upload Data", "🛠 Admin Panel"]
-
-    page = st.radio("Menu", pages)
-
-    if st.button("Logout"):
-        st.session_state.clear()
-        st.rerun()
-
-# ---------------- HEADER ----------------
-col1, col2 = st.columns([1,8])
-
-with col1:
-    if os.path.exists("logo.png"):
-        st.image("logo.png", width=80)
-
-with col2:
-    st.markdown("<div class='main-title'>📊 Price Lookup System</div>", unsafe_allow_html=True)
+    st.session_state.input_table = pd.DataFrame(columns=["Brand", "Part No", "Qty"])
 
 # ---------------- NORMALIZER ----------------
 def norm(x):
     if pd.isna(x):
         return ""
-    return str(x).replace(".0","").replace(" ","").replace("-","").replace("/","").lstrip("0").strip().lower()
+    return str(x).replace(".0", "").replace(" ", "").replace("-", "").replace("/", "").strip().lower()
 
-# ================= PRICE PAGE =================
-if page == "📊 Price Lookup":
+# ---------------- SAFE VALUE ----------------
+def safe(v, is_int=False):
+    try:
+        if v is None:
+            return None
+        if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+            return None
+        if is_int:
+            return int(float(v))
+        return float(v)
+    except:
+        return v
 
-    col1, col2 = st.columns([9,1])
+# ---------------- CLEAN EXCEL ----------------
+def clean_excel(df):
 
-    with col2:
-        if st.button("🔄"):
-            st.cache_data.clear()
-            st.rerun()
+    df.columns = df.columns.str.strip().str.lower()
 
-    db_df = load_parts()
+    mapping = {
+        "part no": "part_no",
+        "part number": "part_no",
+        "brand": "brand",
+        "price [eur]": "price",
+        "price": "price",
+        "item description": "description",
+        "description": "description",
+        "moq": "moq"
+    }
 
-    if db_df.empty:
-        st.warning("No data found")
-        st.stop()
+    df = df.rename(columns=mapping)
 
-    db_df["part_no"] = db_df["part_no"].astype(str).apply(norm)
-    db_df["brand"] = db_df["brand"].astype(str).str.lower()
+    for col in ["part_no", "brand", "price"]:
+        if col not in df.columns:
+            df[col] = None
 
-    input_df = st.data_editor(st.session_state.input_table, num_rows="dynamic")
+    if "description" not in df.columns:
+        df["description"] = None
 
-    if st.button("🔎 Fetch Prices"):
-        result = []
+    if "moq" not in df.columns:
+        df["moq"] = 0
 
-        for _, r in input_df.iterrows():
-            part = norm(r["Part No"])
-            brand = str(r["Brand"]).lower()
-            qty = float(r["Qty"] or 1)
+    df["part_no"] = df["part_no"].astype(str).apply(norm)
+    df["brand"] = df["brand"].astype(str).str.lower()
 
-            match = db_df[(db_df["part_no"] == part) & (db_df["brand"] == brand)]
+    df["price"] = pd.to_numeric(df["price"], errors="coerce").fillna(0)
+    df["moq"] = pd.to_numeric(df["moq"], errors="coerce").fillna(0)
 
-            if not match.empty:
-                row = match.iloc[0]
-                price = float(row["price"])
-                desc = row.get("description", "")
-            else:
-                price = 0
-                desc = "Not found"
+    df = df.dropna(subset=["part_no", "brand"])
 
-            result.append({
-                "Brand": r["Brand"],
-                "Part No": r["Part No"],
-                "Description": desc,
-                "Qty": qty,
-                "Price": price,
-                "Amount": qty * price
-            })
+    df = df.replace([float("inf"), -float("inf")], None)
+    df = df.where(pd.notnull(df), None)
 
-        st.session_state.table_data = pd.DataFrame(result)
+    return df
 
-    df = st.session_state.table_data.copy()
+# ---------------- UI HEADER ----------------
+st.markdown("<div class='main-title'>📊 Price Lookup System</div>", unsafe_allow_html=True)
+
+# ---------------- LOAD DB ----------------
+db_df = load_parts()
+
+if db_df.empty:
+    st.warning("Upload data first")
+    st.stop()
+
+db_df["part_no"] = db_df["part_no"].astype(str).apply(norm)
+db_df["brand"] = db_df["brand"].astype(str).str.lower()
+
+# ---------------- INPUT ----------------
+st.subheader("Enter Parts")
+
+input_df = st.data_editor(
+    st.session_state.input_table,
+    num_rows="dynamic",
+    use_container_width=True
+)
+
+# ---------------- FETCH PRICES ----------------
+if st.button("🔎 Fetch Prices"):
+
+    result = []
+
+    for _, r in input_df.iterrows():
+
+        part = norm(r.get("Part No"))
+        brand = str(r.get("Brand","")).lower()
+        qty = pd.to_numeric(r.get("Qty"), errors="coerce")
+
+        if pd.isna(qty) or qty <= 0:
+            qty = 1
+
+        match = db_df[
+            (db_df["part_no"] == part) &
+            (db_df["brand"] == brand)
+        ]
+
+        if not match.empty:
+            row = match.iloc[0]
+            price = float(row.get("price", 0))
+            desc = row.get("description", "N/A")
+        else:
+            price = 0
+            desc = "Not Found"
+
+        result.append({
+            "Brand": r.get("Brand"),
+            "Part No": r.get("Part No"),
+            "Description": desc,
+            "Qty": qty,
+            "Price": price,
+            "Amount": qty * price
+        })
+
+    st.session_state.table_data = pd.DataFrame(result)
+
+# ---------------- RESULT TABLE ----------------
+df = st.session_state.table_data
+
+if not df.empty:
 
     df["Qty"] = pd.to_numeric(df["Qty"], errors="coerce").fillna(0)
     df["Price"] = pd.to_numeric(df["Price"], errors="coerce").fillna(0)
     df["Amount"] = df["Qty"] * df["Price"]
 
     st.dataframe(df, use_container_width=True)
+
     st.markdown(f"### 💰 Total: € {df['Amount'].sum():.2f}")
 
-    # ---------------- SAVE OFFER ----------------
-    if st.button("💾 Save Offer"):
+# ---------------- SAVE OFFER ----------------
+if st.button("💾 Save Offer") and not df.empty:
 
-        batch = []
+    records = []
 
-        for _, row in df.iterrows():
+    for _, r in df.iterrows():
+        records.append({
+            "username": "user",
+            "brand": r["Brand"],
+            "part_no": r["Part No"],
+            "qty": safe(r["Qty"], True),
+            "price": safe(r["Price"]),
+            "amount": safe(r["Amount"])
+        })
 
-            batch.append({
-                "username": username,
-                "brand": str(row["Brand"]),
-                "part_no": str(row["Part No"]),
-                "qty": float(row["Qty"] or 0),
-                "price": float(row["Price"] or 0),
-                "amount": float(row["Amount"] or 0)
-            })
+    # BULK SAFE INSERT
+    for i in range(0, len(records), 200):
+        supabase.table("offer_items").insert(records[i:i+200]).execute()
 
-        # 🚀 FAST BULK INSERT (FIX SPEED ISSUE)
-        BATCH_SIZE = 100
+    st.success("Saved successfully")
 
-        for i in range(0, len(batch), BATCH_SIZE):
-            supabase.table("offer_items").insert(batch[i:i+BATCH_SIZE]).execute()
+# ---------------- UPLOAD ----------------
+st.subheader("Upload Excel")
 
-        st.success("Saved successfully")
+files = st.file_uploader("Upload", type=["xlsx"], accept_multiple_files=True)
 
-# ================= UPLOAD PAGE (FAST VERSION) =================
-elif page == "📤 Upload Data" and username == "admin":
+if files:
 
-    st.title("📤 Upload Excel")
+    total = 0
 
-    files = st.file_uploader("Upload", type=["xlsx"], accept_multiple_files=True)
+    for f in files:
 
-    if files:
+        df = pd.read_excel(f, dtype=str)
+        df = clean_excel(df)
 
-        total = 0
-        progress = st.progress(0)
+        data = df.to_dict(orient="records")
 
-        for i, f in enumerate(files):
+        # safe insert
+        for i in range(0, len(data), 200):
+            supabase.table("parts_table").insert(data[i:i+200]).execute()
 
-            df = pd.read_excel(f)
+        total += len(data)
 
-            df.columns = df.columns.str.strip().str.lower()
-
-            df.rename(columns={
-                "part no": "part_no",
-                "price [eur]": "price",
-                "item description": "description",
-                "moq": "moq"
-            }, inplace=True)
-
-            df = df[["part_no","brand","price","description","moq"]]
-
-            df["part_no"] = df["part_no"].astype(str).apply(norm)
-            df["brand"] = df["brand"].astype(str).str.lower()
-
-            df["price"] = pd.to_numeric(df["price"], errors="coerce").fillna(0)
-
-            df = df.replace([float("inf"), -float("inf")], 0)
-            df = df.fillna("")
-
-            records = df.to_dict("records")
-
-            # 🚀 BULK INSERT SPEED FIX
-            for j in range(0, len(records), 200):
-                supabase.table("parts_table").insert(records[j:j+200]).execute()
-
-            total += len(records)
-            progress.progress((i+1)/len(files))
-
-        st.success(f"Uploaded {total} rows")
-        st.cache_data.clear()
-        st.rerun()
-
-# ================= ADMIN =================
-elif page == "🛠 Admin Panel" and username == "admin":
-
-    st.subheader("Admin Panel")
-
-    u = st.text_input("New user")
-    p = st.text_input("Password")
-
-    if st.button("Add"):
-        supabase.table("users").insert({"username": u, "password": p}).execute()
-        st.success("Added")
+    st.success(f"Uploaded {total} rows")
+    st.cache_data.clear()
