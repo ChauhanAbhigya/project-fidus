@@ -12,6 +12,20 @@ supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 st.set_page_config(layout="wide")
 
+# ---------------- SAFE CLEAN ----------------
+def safe(v):
+    if v is None:
+        return None
+    if isinstance(v, float):
+        if math.isnan(v) or math.isinf(v):
+            return None
+    if pd.isna(v):
+        return None
+    return v
+
+def clean_row(row):
+    return {k: safe(v) for k, v in row.items()}
+
 # ---------------- CACHE ----------------
 @st.cache_data(ttl=0)
 def load_parts():
@@ -21,7 +35,7 @@ def load_parts():
     except:
         return pd.DataFrame()
 
-# ---------------- SESSION STATE ----------------
+# ---------------- SESSION ----------------
 if "table_data" not in st.session_state:
     st.session_state.table_data = pd.DataFrame(
         columns=["Brand","Part No","Description","Qty","Price","Amount"]
@@ -88,21 +102,16 @@ with col1:
 with col2:
     st.markdown("<div class='main-title'>📊 Price Lookup System</div>", unsafe_allow_html=True)
 
-# ========================= SAFE NORMALIZER =========================
+# ---------------- NORMALIZER ----------------
 def norm(x):
     if pd.isna(x):
         return ""
-    x = str(x)
-    x = x.replace(".0","")
-    x = x.replace(" ","").replace("-","").replace("/","")
-    x = x.lstrip("0")
-    return x.strip().lower()
+    return str(x).replace(".0","").replace(" ","").replace("-","").replace("/","").lstrip("0").strip().lower()
 
-# ========================= UNIVERSAL EXCEL CLEANER =========================
+# ---------------- CLEAN EXCEL ----------------
 def clean_excel(df):
     df.columns = df.columns.str.strip().str.lower()
 
-    # UNIVERSAL COLUMN MAP
     col_map = {
         "part no": "part_no",
         "part number": "part_no",
@@ -117,7 +126,6 @@ def clean_excel(df):
 
     df.rename(columns=col_map, inplace=True)
 
-    # ensure required columns exist
     for col in ["part_no", "brand", "price"]:
         if col not in df.columns:
             df[col] = None
@@ -131,7 +139,6 @@ def clean_excel(df):
 
     df = df.dropna(subset=["part_no", "brand"])
 
-    # REMOVE NaN / INF (CRITICAL FIX)
     df = df.replace([float("inf"), -float("inf")], None)
     df = df.where(pd.notnull(df), None)
 
@@ -220,17 +227,19 @@ if page == "📊 Price Lookup":
     st.markdown(f"### 💰 Total: € {df['Amount'].sum():.2f}")
 
     if st.button("💾 Save Offer"):
-        for _, row in df.iterrows():
 
-            # FINAL SAFETY FIX (NO NaN TO SUPABASE)
-            supabase.table("offer_items").insert({
+        clean_data = []
+        for _, row in df.iterrows():
+            clean_data.append(clean_row({
                 "username": username,
                 "brand": row["Brand"],
                 "part_no": row["Part No"],
                 "qty": float(row["Qty"] or 0),
                 "price": float(row["Price"] or 0),
                 "amount": float(row["Amount"] or 0)
-            }).execute()
+            }))
+
+        supabase.table("offer_items").insert(clean_data).execute()
 
         st.success("Saved successfully")
 
@@ -254,14 +263,15 @@ elif page == "📤 Upload Data" and username == "admin":
 
             try:
                 df = pd.read_excel(uploaded_file, dtype=str)
-
                 df = clean_excel(df)
 
                 data = df.to_dict(orient="records")
 
-                supabase.table("parts_table_v2").insert(data).execute()
+                clean_data = [clean_row(r) for r in data]
 
-                total_rows += len(data)
+                supabase.table("parts_table_v2").insert(clean_data).execute()
+
+                total_rows += len(clean_data)
 
             except Exception as e:
                 st.error(f"❌ Error: {e}")
