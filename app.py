@@ -1,18 +1,16 @@
-
 import streamlit as st
 import pandas as pd
-import os
-import math
 import psycopg2
 from psycopg2.extras import execute_values
+import math
 
-# ---------------- POSTGRES CONNECTION ----------------
+# ---------------- DB CONNECTION ----------------
 DATABASE_URL = "postgresql://parts_db_bi6b_user:vVxgefrTwrWGoHwzIPXbfemlrb4Fn6GW@dpg-d7o8oqgg4nts73aagbcg-a.oregon-postgres.render.com/parts_db_bi6b"
 
 conn = psycopg2.connect(DATABASE_URL)
 cur = conn.cursor()
 
-# ---------------- AUTO CREATE TABLES ----------------
+# ---------------- CREATE TABLES ----------------
 cur.execute("""
 CREATE TABLE IF NOT EXISTS parts_table (
     id SERIAL PRIMARY KEY,
@@ -32,12 +30,11 @@ CREATE TABLE IF NOT EXISTS users (
 );
 """)
 
+# default admin
 cur.execute("""
 INSERT INTO users (username, password)
 SELECT 'admin', 'admin'
-WHERE NOT EXISTS (
-    SELECT 1 FROM users WHERE username='admin'
-);
+WHERE NOT EXISTS (SELECT 1 FROM users WHERE username='admin');
 """)
 
 conn.commit()
@@ -82,7 +79,6 @@ if st.session_state.user is None:
             st.rerun()
         else:
             st.error("Invalid credentials")
-
     st.stop()
 
 username = st.session_state.user["username"]
@@ -138,7 +134,7 @@ if page == "📊 Price Lookup":
 
     brand_list = sorted(db_df["brand"].unique().tolist())
 
-    # 🔄 Refresh Button
+    # 🔄 refresh
     col1, col2 = st.columns([10,1])
     with col2:
         if st.button("🔄"):
@@ -150,12 +146,8 @@ if page == "📊 Price Lookup":
         num_rows="dynamic",
         use_container_width=True,
         column_config={
-            "Brand": st.column_config.SelectboxColumn(
-                "Brand",
-                options=brand_list
-            )
-        },
-        key="input_editor"
+            "Brand": st.column_config.SelectboxColumn("Brand", options=brand_list)
+        }
     )
 
     if st.button("🔎 Fetch Prices"):
@@ -196,24 +188,23 @@ if page == "📊 Price Lookup":
         st.session_state.table_data = pd.DataFrame(result)
 
     df = st.session_state.table_data.copy()
-
     df["Qty"] = pd.to_numeric(df["Qty"], errors="coerce").fillna(0)
     df["Price"] = pd.to_numeric(df["Price"], errors="coerce").fillna(0)
     df["Amount"] = df["Qty"] * df["Price"]
 
     st.dataframe(df, use_container_width=True)
-
     st.markdown(f"### 💰 Total: € {df['Amount'].sum():.2f}")
 
-# ================= UPLOAD =================
+# ================= UPLOAD (FAST ⚡) =================
 elif page == "📤 Upload Data":
 
     uploaded = st.file_uploader("Upload Excel", type=["xlsx"], accept_multiple_files=True)
 
     if uploaded:
         total = 0
+        progress = st.progress(0)
 
-        for f in uploaded:
+        for i, f in enumerate(uploaded):
 
             df = pd.read_excel(f)
             df.columns = df.columns.str.strip().str.lower()
@@ -233,7 +224,7 @@ elif page == "📤 Upload Data":
 
             df["part_no"] = df["part_no"].astype(str).apply(norm)
             df["brand"] = df["brand"].astype(str).str.strip()
-            df["price"] = pd.to_numeric(df["price"], errors="coerce").fillna(0)
+            df["price"] = pd.to_numeric(df["price"], errors="coerce")
 
             df = df[(df["part_no"] != "") & (df["brand"] != "")]
 
@@ -242,6 +233,7 @@ elif page == "📤 Upload Data":
 
             records = df.to_dict(orient="records")
 
+            # ⚡ FAST BULK INSERT
             values = [
                 (
                     r.get("part_no"),
@@ -262,6 +254,7 @@ elif page == "📤 Upload Data":
             conn.commit()
 
             total += len(records)
+            progress.progress((i+1)/len(uploaded))
 
         st.cache_data.clear()
         st.success(f"Uploaded {total} rows")
