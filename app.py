@@ -16,12 +16,22 @@ st.set_page_config(layout="wide")
 st.markdown("""
 <style>
 body {
-    background: linear-gradient(135deg, #f7faff, #eef3ff);
+    background: linear-gradient(135deg, #e3f2fd, #fce4ec);
 }
 .main-title {
     font-size: 32px;
     font-weight: 700;
     color: #1a237e;
+}
+.login-box {
+    width: 380px;
+    margin: auto;
+    margin-top: 120px;
+    padding: 30px;
+    background: linear-gradient(135deg, #ffffff, #f3f6ff);
+    border-radius: 14px;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.08);
+    text-align: center;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -60,34 +70,12 @@ def login(u, p):
 
 if st.session_state.user is None:
 
-    st.markdown("""
-    <style>
-    .login-box {
-        width: 380px;
-        margin: auto;
-        margin-top: 100px;
-        padding: 30px;
-        background: white;
-        border-radius: 14px;
-        box-shadow: 0 10px 40px rgba(0,0,0,0.08);
-        text-align: center;
-    }
-    .login-title {
-        font-size: 22px;
-        font-weight: 600;
-        margin-top: 10px;
-        margin-bottom: 20px;
-        color: #1a237e;
-    }
-    </style>
-    """, unsafe_allow_html=True)
-
     st.markdown("<div class='login-box'>", unsafe_allow_html=True)
 
     if os.path.exists("logo.png"):
         st.image("logo.png", width=120)
 
-    st.markdown("<div class='login-title'>Price Lookup System</div>", unsafe_allow_html=True)
+    st.markdown("### 🔐 Login")
 
     u = st.text_input("Username")
     p = st.text_input("Password", type="password")
@@ -110,7 +98,7 @@ username = user["username"]
 with st.sidebar:
     st.markdown(f"👤 Logged in: **{username}**")
 
-    pages = ["📊 Price Lookup"]
+    pages = ["📊 Price Lookup", "📄 Saved Offers"]
     if username == "admin":
         pages += ["📤 Upload Data", "🛠 Admin Panel"]
 
@@ -142,6 +130,13 @@ def safe(v, is_int=False):
 # ---------------- PRICE PAGE ----------------
 if page == "📊 Price Lookup":
 
+    colr1, colr2 = st.columns([6,1])
+    with colr2:
+        if st.button("🔄 Refresh"):
+            load_parts.clear()
+            st.cache_data.clear()
+            st.rerun()
+
     db_df = load_parts()
 
     if db_df.empty:
@@ -169,18 +164,9 @@ if page == "📊 Price Lookup":
         result = []
 
         for _, r in input_df.iterrows():
-
             part = norm(r.get("Part No"))
             brand = str(r.get("Brand","")).lower()
             qty = pd.to_numeric(r.get("Qty"), errors="coerce")
-
-            if not part:
-                st.warning("Part number cannot be empty")
-                continue
-
-            if not brand:
-                st.warning("Brand cannot be empty")
-                continue
 
             if pd.isna(qty) or qty <= 0:
                 qty = 1
@@ -208,43 +194,31 @@ if page == "📊 Price Lookup":
             })
 
         st.session_state.table_data = pd.DataFrame(result)
-        st.success("Prices fetched successfully")
 
     df = st.session_state.table_data.copy()
 
     if not df.empty:
-        df["Qty"] = pd.to_numeric(df["Qty"], errors="coerce").fillna(0)
-        df["Price"] = pd.to_numeric(df["Price"], errors="coerce").fillna(0)
         df["Amount"] = df["Qty"] * df["Price"]
-
         st.dataframe(df, use_container_width=True)
-        st.markdown(f"### 💰 Total Amount: € {df['Amount'].sum():.2f}")
+        st.markdown(f"### 💰 Total: € {df['Amount'].sum():.2f}")
 
-    if st.button("💾 Save Offer"):
+# ---------------- SAVED OFFERS ----------------
+elif page == "📄 Saved Offers":
 
-        records = []
-        for _, r in df.iterrows():
-            records.append({
-                "username": username,
-                "brand": r["Brand"],
-                "part_no": r["Part No"],
-                "qty": safe(r["Qty"], True),
-                "price": safe(r["Price"]),
-                "amount": safe(r["Amount"])
-            })
+    data = supabase.table("offer_items").select("*").execute().data
+    df = pd.DataFrame(data or [])
 
-        for i in range(0, len(records), 200):
-            supabase.table("offer_items").insert(records[i:i+200]).execute()
+    if df.empty:
+        st.info("No saved offers found")
+    else:
+        st.dataframe(df, use_container_width=True)
 
-        st.success("Saved")
-
-# ---------------- UPLOAD (FIXED) ----------------
+# ---------------- UPLOAD ----------------
 elif page == "📤 Upload Data" and username == "admin":
 
     uploaded = st.file_uploader("Upload Excel", type=["xlsx"])
 
     if uploaded:
-
         df = pd.read_excel(uploaded, dtype=str)
         df.columns = df.columns.str.strip().str.lower()
 
@@ -259,9 +233,6 @@ elif page == "📤 Upload Data" and username == "admin":
         df["part_no"] = df["part_no"].astype(str).str.strip()
         df["brand"] = df["brand"].astype(str).str.strip().str.lower()
         df["price"] = pd.to_numeric(df["price"], errors="coerce").fillna(0)
-        df["moq"] = pd.to_numeric(df.get("moq", 0), errors="coerce").fillna(0)
-
-        df = df.dropna(subset=["part_no", "brand"])
 
         data = df.to_dict(orient="records")
 
@@ -275,25 +246,12 @@ elif page == "📤 Upload Data" and username == "admin":
                     clean_row[k] = v
             clean_data.append(clean_row)
 
-        inserted_total = 0
-
         for i in range(0, len(clean_data), 200):
-            batch = clean_data[i:i+200]
-            res = supabase.table("parts_table").insert(batch).execute()
+            supabase.table("parts_table").insert(clean_data[i:i+200]).execute()
 
-            if res.data:
-                inserted_total += len(res.data)
-            else:
-                st.error("❌ Insert failed")
-                st.write(res)
-                st.stop()
-
-        st.success(f"✅ Uploaded {inserted_total} rows")
-
+        st.success(f"Uploaded {len(clean_data)} rows")
+        load_parts.clear()
         st.cache_data.clear()
-        st.session_state.table_data = pd.DataFrame()
-        st.session_state.input_table = pd.DataFrame(columns=["Brand","Part No","Qty"])
-
         st.rerun()
 
 # ---------------- ADMIN ----------------
