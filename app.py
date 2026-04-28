@@ -112,12 +112,15 @@ with st.sidebar:
         st.session_state.clear()
         st.rerun()
 
-# ---------------- HELPERS ----------------
+# ---------------- HELPERS --------------
+
 def norm(x):
     if pd.isna(x):
         return ""
     x = str(x).lower().strip()
-    return re.sub(r'[^a-z0-9]', '', x)   # 🔥 UNIVERSAL NORMALIZATION
+    x = re.sub(r'[^a-z0-9]', '', x)   # remove symbols
+    x = x.lstrip('0')                 # 🔥 REMOVE LEADING ZEROS
+    return x
 
 def safe_float(v):
     try:
