@@ -2,7 +2,6 @@ from supabase import create_client
 import streamlit as st
 import pandas as pd
 import os
-import math
 
 # ---------------- SUPABASE ----------------
 SUPABASE_URL = "https://eicwssbhjfvekaerjljm.supabase.co"
@@ -59,6 +58,7 @@ if st.session_state.user is None:
             st.rerun()
         else:
             st.error("Invalid username or password")
+
     st.stop()
 
 user = st.session_state.user
@@ -89,57 +89,49 @@ with col1:
 with col2:
     st.markdown("<h2>📊 Price Lookup System</h2>", unsafe_allow_html=True)
 
-# ========================= SAFE NORMALIZER =========================
+# ========================= NORMALIZER =========================
 def norm(x):
     if pd.isna(x):
         return ""
     return (
         str(x)
-        .replace(".0","")
-        .replace(" ","")
-        .replace("-","")
-        .replace("/","")
-        .lstrip("0")
         .strip()
         .lower()
+        .replace(" ", "")
+        .replace("-", "")
+        .replace("/", "")
     )
 
-# ========================= UNIVERSAL CLEANER =========================
-def clean_excel(df):
-    df.columns = df.columns.str.strip().str.lower()
+# ========================= SMART MATCH =========================
+def smart_match(df, part, brand):
 
-    col_map = {
-        "part no": "part_no",
-        "part number": "part_no",
-        "partno": "part_no",
+    part = norm(part)
+    brand = str(brand).strip().lower()
 
-        "brand": "brand",
+    df["part_clean"] = df["part_no"].astype(str).apply(norm)
+    df["brand_clean"] = df["brand"].astype(str).str.strip().str.lower()
 
-        "price": "price",
-        "price [eur]": "price",
+    # 1. exact match
+    match = df[
+        (df["part_clean"] == part) &
+        (df["brand_clean"] == brand)
+    ]
 
-        "item description": "description",
-        "description": "description",
+    # 2. prefix match (VERY IMPORTANT for your dataset)
+    if match.empty:
+        match = df[
+            df["part_clean"].str.startswith(part, na=False) &
+            (df["brand_clean"] == brand)
+        ]
 
-        "moq": "moq"
-    }
+    # 3. reverse prefix match
+    if match.empty:
+        match = df[
+            df["part_clean"].apply(lambda x: part.startswith(x)) &
+            (df["brand_clean"] == brand)
+        ]
 
-    df.rename(columns=col_map, inplace=True)
-
-    for col in ["part_no", "brand", "price", "description"]:
-        if col not in df.columns:
-            df[col] = None
-
-    df["part_no"] = df["part_no"].astype(str).apply(norm)
-    df["brand"] = df["brand"].astype(str).str.strip().str.lower()
-    df["price"] = pd.to_numeric(df["price"], errors="coerce").fillna(0)
-
-    df = df.dropna(subset=["part_no", "brand"])
-
-    df = df.replace([float("inf"), -float("inf")], None)
-    df = df.where(pd.notnull(df), None)
-
-    return df
+    return match
 
 # ========================= PRICE PAGE =========================
 if page == "📊 Price Lookup":
@@ -154,18 +146,10 @@ if page == "📊 Price Lookup":
     db_df = load_parts()
 
     if db_df.empty:
-        st.warning("⚠ No data found")
+        st.warning("No data found")
         st.stop()
 
-    # FIX DB CLEANING
-    db_df["part_no"] = db_df["part_no"].astype(str).apply(norm)
-    db_df["brand"] = db_df["brand"].astype(str).str.strip().str.lower()
-
-    if "price" not in db_df.columns:
-        db_df["price"] = 0
-
-    if "description" not in db_df.columns:
-        db_df["description"] = "N/A"
+    db_df["price"] = pd.to_numeric(db_df.get("price", 0), errors="coerce").fillna(0)
 
     brand_list = sorted(db_df["brand"].dropna().unique())
 
@@ -184,20 +168,14 @@ if page == "📊 Price Lookup":
 
         for _, row in input_df.iterrows():
 
-            part = norm(row.get("Part No",""))
-            brand = str(row.get("Brand","")).strip().lower()
+            part = row.get("Part No")
+            brand = row.get("Brand")
             qty = pd.to_numeric(row.get("Qty"), errors="coerce")
-
-            if not part:
-                continue
 
             if pd.isna(qty) or qty <= 0:
                 qty = 1
 
-            match = db_df[
-                (db_df["part_no"] == part) &
-                (db_df["brand"] == brand)
-            ]
+            match = smart_match(db_df, part, brand)
 
             if not match.empty:
                 r = match.iloc[0]
@@ -208,8 +186,8 @@ if page == "📊 Price Lookup":
                 desc = "Item not found"
 
             result.append({
-                "Brand": row.get("Brand"),
-                "Part No": row.get("Part No"),
+                "Brand": brand,
+                "Part No": part,
                 "Description": desc,
                 "Qty": qty,
                 "Price": price,
@@ -229,9 +207,7 @@ if page == "📊 Price Lookup":
     st.markdown(f"### 💰 Total: € {df['Amount'].sum():.2f}")
 
     if st.button("💾 Save Offer"):
-
         for _, row in df.iterrows():
-
             supabase.table("offer_items").insert({
                 "username": username,
                 "brand": row["Brand"],
@@ -262,7 +238,25 @@ elif page == "📤 Upload Data" and username == "admin":
         for i, f in enumerate(uploaded_files):
 
             df = pd.read_excel(f, dtype=str)
-            df = clean_excel(df)
+
+            df.columns = df.columns.str.strip().str.lower()
+
+            df.rename(columns={
+                "part no": "part_no",
+                "price [eur]": "price",
+                "item description": "description"
+            }, inplace=True)
+
+            if "moq" not in df.columns:
+                df["moq"] = 1
+
+            df = df[["part_no","brand","price","description","moq"]]
+
+            df["part_no"] = df["part_no"].astype(str).apply(norm)
+            df["brand"] = df["brand"].astype(str).str.strip().str.lower()
+            df["price"] = pd.to_numeric(df["price"], errors="coerce").fillna(0)
+
+            df = df.dropna(subset=["part_no","brand"])
 
             supabase.table("parts_table_v2").insert(
                 df.to_dict(orient="records")
