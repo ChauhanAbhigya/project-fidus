@@ -17,8 +17,7 @@ st.set_page_config(layout="wide")
 def load_parts():
     try:
         data = supabase.table("parts_table_v2").select("*").execute()
-        df = pd.DataFrame(data.data or [])
-        return df
+        return pd.DataFrame(data.data or [])
     except:
         return pd.DataFrame()
 
@@ -89,11 +88,54 @@ with col1:
 with col2:
     st.markdown("<div class='main-title'>📊 Price Lookup System</div>", unsafe_allow_html=True)
 
-# ========================= NORMALIZE =========================
+# ========================= SAFE NORMALIZER =========================
 def norm(x):
     if pd.isna(x):
         return ""
-    return str(x).replace(".0","").replace(" ","").replace("-","").replace("/","").lstrip("0").strip().lower()
+    x = str(x)
+    x = x.replace(".0","")
+    x = x.replace(" ","").replace("-","").replace("/","")
+    x = x.lstrip("0")
+    return x.strip().lower()
+
+# ========================= UNIVERSAL EXCEL CLEANER =========================
+def clean_excel(df):
+    df.columns = df.columns.str.strip().str.lower()
+
+    # UNIVERSAL COLUMN MAP
+    col_map = {
+        "part no": "part_no",
+        "part number": "part_no",
+        "partno": "part_no",
+        "brand": "brand",
+        "price": "price",
+        "price [eur]": "price",
+        "item description": "description",
+        "description": "description",
+        "moq": "moq"
+    }
+
+    df.rename(columns=col_map, inplace=True)
+
+    # ensure required columns exist
+    for col in ["part_no", "brand", "price"]:
+        if col not in df.columns:
+            df[col] = None
+
+    df["part_no"] = df["part_no"].astype(str).apply(norm)
+    df["brand"] = df["brand"].astype(str).str.strip().str.lower()
+    df["price"] = pd.to_numeric(df["price"], errors="coerce").fillna(0)
+
+    if "description" not in df.columns:
+        df["description"] = "N/A"
+
+    df = df.dropna(subset=["part_no", "brand"])
+
+    # REMOVE NaN / INF (CRITICAL FIX)
+    df = df.replace([float("inf"), -float("inf")], None)
+    df = df.where(pd.notnull(df), None)
+
+    return df
 
 # ========================= PRICE PAGE =========================
 if page == "📊 Price Lookup":
@@ -168,34 +210,26 @@ if page == "📊 Price Lookup":
         st.session_state.table_data = pd.DataFrame(result)
         st.success("Prices fetched successfully")
 
-    edited_df = st.session_state.table_data.copy()
+    df = st.session_state.table_data.copy()
 
-    edited_df["Qty"] = pd.to_numeric(edited_df["Qty"], errors="coerce").fillna(0)
-    edited_df["Price"] = pd.to_numeric(edited_df["Price"], errors="coerce").fillna(0)
-    edited_df["Amount"] = edited_df["Qty"] * edited_df["Price"]
+    df["Qty"] = pd.to_numeric(df["Qty"], errors="coerce").fillna(0)
+    df["Price"] = pd.to_numeric(df["Price"], errors="coerce").fillna(0)
+    df["Amount"] = df["Qty"] * df["Price"]
 
-    st.dataframe(edited_df, use_container_width=True)
+    st.dataframe(df, use_container_width=True)
+    st.markdown(f"### 💰 Total: € {df['Amount'].sum():.2f}")
 
-    st.markdown(f"### 💰 Total Amount: € {edited_df['Amount'].sum():.2f}")
-
-    # ========================= FIXED SAVE (ONLY CHANGE) =========================
     if st.button("💾 Save Offer"):
+        for _, row in df.iterrows():
 
-        def clean(v):
-            if pd.isna(v):
-                return 0
-            if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
-                return 0
-            return v
-
-        for _, row in edited_df.iterrows():
+            # FINAL SAFETY FIX (NO NaN TO SUPABASE)
             supabase.table("offer_items").insert({
                 "username": username,
-                "brand": clean(row["Brand"]),
-                "part_no": clean(row["Part No"]),
-                "qty": float(clean(row["Qty"])),
-                "price": float(clean(row["Price"])),
-                "amount": float(clean(row["Amount"]))
+                "brand": row["Brand"],
+                "part_no": row["Part No"],
+                "qty": float(row["Qty"] or 0),
+                "price": float(row["Price"] or 0),
+                "amount": float(row["Amount"] or 0)
             }).execute()
 
         st.success("Saved successfully")
@@ -221,25 +255,7 @@ elif page == "📤 Upload Data" and username == "admin":
             try:
                 df = pd.read_excel(uploaded_file, dtype=str)
 
-                df.columns = df.columns.str.strip().str.lower()
-
-                df.rename(columns={
-                    "part no": "part_no",
-                    "price [eur]": "price",
-                    "item description": "description",
-                    "moq": "moq"
-                }, inplace=True)
-
-                df = df[["part_no", "brand", "price", "description", "moq"]]
-
-                df["part_no"] = df["part_no"].astype(str).apply(norm)
-                df["brand"] = df["brand"].astype(str).str.strip().str.lower()
-                df["price"] = pd.to_numeric(df["price"], errors="coerce").fillna(0)
-
-                df = df.dropna(subset=["part_no", "brand"])
-
-                df = df.replace([float("inf"), -float("inf")], None)
-                df = df.where(pd.notnull(df), None)
+                df = clean_excel(df)
 
                 data = df.to_dict(orient="records")
 
