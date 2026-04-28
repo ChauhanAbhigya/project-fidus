@@ -72,45 +72,45 @@ with st.sidebar:
         st.session_state.clear()
         st.rerun()
 
-# ---------------- CLEAN FUNCTION ----------------
+# ---------------- CLEAN FUNCTIONS ----------------
 def clean(x):
     if pd.isna(x):
         return ""
     return str(x).strip().lower().replace(" ", "").replace("-", "").replace("/", "").lstrip("0")
 
-# ---------------- UNIVERSAL EXCEL CLEANER ----------------
+# ================= EXCEL CLEANER =================
 def clean_excel(df):
     df.columns = df.columns.str.strip().str.lower()
 
-    mapping = {
+    df.rename(columns={
         "part no": "part_no",
-        "part number": "part_no",
         "brand": "brand",
         "price [eur]": "price_eur",
         "price": "price_eur",
         "item description": "item_description",
         "description": "item_description",
         "moq": "moq"
-    }
+    }, inplace=True)
 
-    df.rename(columns=mapping, inplace=True)
-
-    required = ["part_no", "brand", "price_eur"]
-    for col in required:
+    for col in ["part_no", "brand", "price_eur"]:
         if col not in df.columns:
             df[col] = ""
 
     df["part_no"] = df["part_no"].apply(clean)
     df["brand"] = df["brand"].astype(str).str.lower().str.strip()
 
+    # FIX PRICE
     df["price_eur"] = pd.to_numeric(df["price_eur"], errors="coerce").fillna(0)
-    df["moq"] = pd.to_numeric(df.get("moq", 0), errors="coerce").fillna(0)
+
+    # ✅ FIX MOQ (MAIN ERROR FIX)
+    df["moq"] = pd.to_numeric(df.get("moq", 0), errors="coerce")
+    df["moq"] = df["moq"].fillna(0).astype(int)
 
     df["item_description"] = df.get("item_description", "")
 
     df = df.dropna(subset=["part_no", "brand"])
 
-    # FINAL SAFE CLEAN (IMPORTANT FIX)
+    # FINAL SAFETY CLEAN
     df = df.replace([float("inf"), -float("inf")], 0)
     df = df.fillna("")
 
@@ -154,6 +154,7 @@ if page == "📊 Price Lookup":
             part = clean(row.get("Part No"))
             brand = str(row.get("Brand", "")).strip().lower()
             qty = pd.to_numeric(row.get("Qty"), errors="coerce")
+
             if pd.isna(qty) or qty <= 0:
                 qty = 1
 
@@ -192,14 +193,13 @@ if page == "📊 Price Lookup":
     if st.button("Save Offer") and not df.empty:
 
         for _, row in df.iterrows():
-
             supabase.table("offer_items").insert({
                 "username": username,
                 "brand": str(row["Brand"]),
                 "part_no": str(row["Part No"]),
-                "qty": float(row["Qty"]),
-                "price": float(row["Price"]),
-                "amount": float(row["Amount"])
+                "qty": float(row["Qty"] or 0),
+                "price": float(row["Price"] or 0),
+                "amount": float(row["Amount"] or 0)
             }).execute()
 
         st.success("Saved")
@@ -219,20 +219,21 @@ elif page == "📤 Upload Data" and username == "admin":
         for i, f in enumerate(files):
 
             df = pd.read_excel(f)
-
             df = clean_excel(df)
 
             data = df.to_dict("records")
 
-            # FINAL SAFETY FILTER (NO NAN CRASH)
+            # FINAL HARD SAFETY (NO ERRORS EVER)
             safe = []
             for r in data:
                 clean_r = {}
                 for k, v in r.items():
+
                     if pd.isna(v):
                         clean_r[k] = 0 if k in ["price_eur", "moq"] else ""
                     else:
                         clean_r[k] = v
+
                 safe.append(clean_r)
 
             supabase.table("parts_table").insert(safe).execute()
