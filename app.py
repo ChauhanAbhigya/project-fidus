@@ -2,6 +2,7 @@ from supabase import create_client
 import streamlit as st
 import pandas as pd
 import os
+import math
 
 # ---------------- SUPABASE ----------------
 SUPABASE_URL = "https://eicwssbhjfvekaerjljm.supabase.co"
@@ -14,26 +15,26 @@ st.set_page_config(layout="wide")
 # ---------------- CACHE ----------------
 @st.cache_data(ttl=0)
 def load_parts():
-    try:
-        data = supabase.table("parts_table").select("*").execute()
-        return pd.DataFrame(data.data or [])
-    except:
-        return pd.DataFrame()
+    data = supabase.table("parts_table").select("*").execute()
+    return pd.DataFrame(data.data or [])
 
 # ---------------- SESSION ----------------
+if "table_data" not in st.session_state:
+    st.session_state.table_data = pd.DataFrame(
+        columns=["Brand","Part No","Description","Qty","Price","Amount"]
+    )
+
+if "input_table" not in st.session_state:
+    st.session_state.input_table = pd.DataFrame(
+        columns=["Brand","Part No","Qty"]
+    )
+
+# ---------------- LOGIN ----------------
 if "user" not in st.session_state:
     st.session_state.user = None
 
-if "input_table" not in st.session_state:
-    st.session_state.input_table = pd.DataFrame(columns=["Brand", "Part No", "Qty"])
-
-if "table_data" not in st.session_state:
-    st.session_state.table_data = pd.DataFrame()
-
-# ---------------- LOGIN ----------------
 def login(u, p):
-    res = supabase.table("users")\
-        .select("*")\
+    res = supabase.table("users").select("*")\
         .eq("username", u.strip())\
         .eq("password", p.strip())\
         .execute()
@@ -54,121 +55,86 @@ if st.session_state.user is None:
 
     st.stop()
 
-user = st.session_state.user
-username = user["username"]
+username = st.session_state.user["username"]
 
-# ---------------- SIDEBAR ----------------
-with st.sidebar:
-    st.write(f"👤 {username}")
-
-    pages = ["📊 Price Lookup"]
-    if username == "admin":
-        pages.append("📤 Upload Data")
-        pages.append("🛠 Admin Panel")
-
-    page = st.radio("Menu", pages)
-
-    if st.button("Logout"):
-        st.session_state.clear()
-        st.rerun()
-
-# ---------------- CLEAN FUNCTIONS ----------------
-def clean(x):
-    if pd.isna(x):
+# ---------------- NORMALIZER ----------------
+def norm(x):
+    if x is None or (isinstance(x, float) and math.isnan(x)):
         return ""
-    return str(x).strip().lower().replace(" ", "").replace("-", "").replace("/", "").lstrip("0")
+    return str(x).replace(".0","").replace(" ","").replace("-","").replace("/","").lstrip("0").lower().strip()
 
-# ================= EXCEL CLEANER =================
+# ---------------- CLEAN EXCEL ----------------
 def clean_excel(df):
     df.columns = df.columns.str.strip().str.lower()
 
-    df.rename(columns={
+    # universal mapping for YOUR file
+    df = df.rename(columns={
         "part no": "part_no",
+        "part number": "part_no",
         "brand": "brand",
-        "price [eur]": "price_eur",
-        "price": "price_eur",
-        "item description": "item_description",
-        "description": "item_description",
+        "price [eur]": "price",
+        "item description": "description",
         "moq": "moq"
-    }, inplace=True)
+    })
 
-    for col in ["part_no", "brand", "price_eur"]:
+    # ensure columns exist
+    for col in ["part_no","brand","price","description","moq"]:
         if col not in df.columns:
-            df[col] = ""
+            df[col] = None
 
-    df["part_no"] = df["part_no"].apply(clean)
+    # clean part no
+    df["part_no"] = df["part_no"].apply(norm)
     df["brand"] = df["brand"].astype(str).str.lower().str.strip()
 
-    # FIX PRICE
-    df["price_eur"] = pd.to_numeric(df["price_eur"], errors="coerce").fillna(0)
+    # FIX PRICE + MOQ TYPES (IMPORTANT)
+    df["price"] = pd.to_numeric(df["price"], errors="coerce").fillna(0)
+    df["moq"] = pd.to_numeric(df["moq"], errors="coerce").fillna(1).astype(int)
 
-    # ✅ FIX MOQ (MAIN ERROR FIX)
-    df["moq"] = pd.to_numeric(df.get("moq", 0), errors="coerce")
-    df["moq"] = df["moq"].fillna(0).astype(int)
+    df["description"] = df["description"].fillna("N/A")
 
-    df["item_description"] = df.get("item_description", "")
+    df = df.dropna(subset=["part_no","brand"])
 
-    df = df.dropna(subset=["part_no", "brand"])
-
-    # FINAL SAFETY CLEAN
+    # remove bad JSON values
     df = df.replace([float("inf"), -float("inf")], 0)
-    df = df.fillna("")
 
     return df
 
-# ================= PRICE LOOKUP =================
-if page == "📊 Price Lookup":
+# ---------------- PRICE PAGE ----------------
+if True:
 
-    col1, col2 = st.columns([10, 1])
-    with col2:
-        if st.button("🔄 Refresh"):
-            st.cache_data.clear()
-            st.rerun()
+    db_df = load_parts()
 
-    db = load_parts()
+    if not db_df.empty:
+        db_df["part_no"] = db_df["part_no"].apply(norm)
+        db_df["brand"] = db_df["brand"].str.lower().str.strip()
 
-    if db.empty:
-        st.warning("No data found")
-        st.stop()
+    if st.button("🔎 Fetch Prices"):
 
-    db["part_no"] = db["part_no"].astype(str).apply(clean)
-    db["brand"] = db["brand"].astype(str).str.lower().str.strip()
+        result = []
 
-    brand_list = sorted(db["brand"].unique())
+        for _, row in st.session_state.input_table.iterrows():
 
-    input_df = st.data_editor(
-        st.session_state.input_table,
-        num_rows="dynamic",
-        use_container_width=True,
-        column_config={
-            "Brand": st.column_config.SelectboxColumn("Brand", options=brand_list)
-        }
-    )
-
-    if st.button("Fetch Prices"):
-
-        results = []
-
-        for _, row in input_df.iterrows():
-
-            part = clean(row.get("Part No"))
-            brand = str(row.get("Brand", "")).strip().lower()
+            part = norm(row.get("Part No"))
+            brand = str(row.get("Brand","")).lower().strip()
             qty = pd.to_numeric(row.get("Qty"), errors="coerce")
 
-            if pd.isna(qty) or qty <= 0:
+            if qty is None or math.isnan(qty) or qty <= 0:
                 qty = 1
 
-            match = db[(db["part_no"] == part) & (db["brand"] == brand)]
+            match = db_df[
+                (db_df["part_no"] == part) &
+                (db_df["brand"] == brand)
+            ]
 
             if not match.empty:
                 r = match.iloc[0]
-                price = float(r["price_eur"])
-                desc = r.get("item_description", "")
+                price = float(r["price"])
+                desc = r["description"]
             else:
                 price = 0
                 desc = "Not Found"
 
-            results.append({
+            result.append({
                 "Brand": row.get("Brand"),
                 "Part No": row.get("Part No"),
                 "Description": desc,
@@ -177,91 +143,61 @@ if page == "📊 Price Lookup":
                 "Amount": qty * price
             })
 
-        st.session_state.table_data = pd.DataFrame(results)
-        st.success("Fetched")
+        st.session_state.table_data = pd.DataFrame(result)
 
     df = st.session_state.table_data.copy()
 
-    if not df.empty:
-        df["Qty"] = pd.to_numeric(df["Qty"], errors="coerce").fillna(0)
-        df["Price"] = pd.to_numeric(df["Price"], errors="coerce").fillna(0)
-        df["Amount"] = df["Qty"] * df["Price"]
+    df["Qty"] = pd.to_numeric(df["Qty"], errors="coerce").fillna(0)
+    df["Price"] = pd.to_numeric(df["Price"], errors="coerce").fillna(0)
+    df["Amount"] = df["Qty"] * df["Price"]
 
-        st.dataframe(df, use_container_width=True)
-        st.write("Total:", df["Amount"].sum())
+    st.dataframe(df, use_container_width=True)
+    st.markdown(f"### 💰 Total: € {df['Amount'].sum():.2f}")
 
-    if st.button("Save Offer") and not df.empty:
+    # ---------------- SAVE (FIXED BATCH + NO NAN CRASH) ----------------
+    if st.button("💾 Save Offer"):
 
-        for _, row in df.iterrows():
-            supabase.table("offer_items").insert({
+        clean_rows = []
+
+        for _, r in df.iterrows():
+            clean_rows.append({
                 "username": username,
-                "brand": str(row["Brand"]),
-                "part_no": str(row["Part No"]),
-                "qty": float(row["Qty"] or 0),
-                "price": float(row["Price"] or 0),
-                "amount": float(row["Amount"] or 0)
-            }).execute()
+                "brand": str(r["Brand"]),
+                "part_no": str(r["Part No"]),
+                "qty": int(float(r["Qty"] or 0)),
+                "price": float(r["Price"] or 0),
+                "amount": float(r["Amount"] or 0)
+            })
 
-        st.success("Saved")
+        # BATCH INSERT (fix timeout)
+        BATCH = 50
+        for i in range(0, len(clean_rows), BATCH):
+            supabase.table("offer_items").insert(clean_rows[i:i+BATCH]).execute()
 
-# ================= UPLOAD =================
-elif page == "📤 Upload Data" and username == "admin":
+        st.success("Saved successfully")
 
-    st.title("Upload Excel")
+# ---------------- UPLOAD (SAFE + BATCH) ----------------
+if username == "admin" and st.button("Upload Excel"):
 
-    files = st.file_uploader("Upload", type=["xlsx"], accept_multiple_files=True)
+    uploaded = st.file_uploader("Upload Excel", type=["xlsx"], accept_multiple_files=True)
 
-    if files:
+    if uploaded:
 
-        total = 0
-        progress = st.progress(0)
+        all_rows = []
 
-        for i, f in enumerate(files):
+        for file in uploaded:
 
-            df = pd.read_excel(f)
+            df = pd.read_excel(file)
             df = clean_excel(df)
 
-            data = df.to_dict("records")
+            all_rows.extend(df.to_dict("records"))
 
-            # FINAL HARD SAFETY (NO ERRORS EVER)
-            safe = []
-            for r in data:
-                clean_r = {}
-                for k, v in r.items():
+        # FIX: batch insert (prevents timeout)
+        BATCH = 100
 
-                    if pd.isna(v):
-                        clean_r[k] = 0 if k in ["price_eur", "moq"] else ""
-                    else:
-                        clean_r[k] = v
+        for i in range(0, len(all_rows), BATCH):
+            chunk = all_rows[i:i+BATCH]
+            supabase.table("parts_table").insert(chunk).execute()
 
-                safe.append(clean_r)
-
-            supabase.table("parts_table").insert(safe).execute()
-
-            total += len(safe)
-            progress.progress((i+1)/len(files))
-
-        st.success(f"Uploaded {total}")
-
+        st.success("Upload complete")
         st.cache_data.clear()
-        st.rerun()
-
-# ================= ADMIN =================
-elif page == "🛠 Admin Panel" and username == "admin":
-
-    st.subheader("Admin")
-
-    u = st.text_input("New user")
-    p = st.text_input("Password", type="password")
-
-    if st.button("Add"):
-        supabase.table("users").insert({
-            "username": u,
-            "password": p
-        }).execute()
-        st.success("Added")
-
-    users = supabase.table("users").select("*").execute().data
-
-    for x in users:
-        st.write(x["username"])
