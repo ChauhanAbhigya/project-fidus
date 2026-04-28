@@ -4,13 +4,22 @@ import pandas as pd
 import os
 import math
 
-# ---------------- SUPABASE ----------------
-SUPABASE_URL = st.secrets["SUPABASE_URL"]
-SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
+st.set_page_config(layout="wide")
+
+# ---------------- 🔐 SUPABASE CONFIG (NEW) ----------------
+st.sidebar.markdown("### 🔗 Supabase Config")
+
+default_url = os.getenv("https://eicwssbhjfvekaerjljm.supabase.co", "")
+default_key = os.getenv("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVpY3dzc2JoamZ2ZWthZXJqbGptIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcyNzI1NTUsImV4cCI6MjA5Mjg0ODU1NX0.okPnbQrcKN6A2-Xj_99TgB47mtx9H6KO20asriBA19g", "")
+
+SUPABASE_URL = st.sidebar.text_input("Supabase URL", value=default_url)
+SUPABASE_KEY = st.sidebar.text_input("Supabase Key", value=default_key, type="password")
+
+if not SUPABASE_URL or not SUPABASE_KEY:
+    st.warning("Please enter Supabase URL and Key in sidebar")
+    st.stop()
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-
-st.set_page_config(layout="wide")
 
 # ---------------- UI ----------------
 st.markdown("""
@@ -49,7 +58,7 @@ if "input_table" not in st.session_state:
 if "user" not in st.session_state:
     st.session_state.user = None
 
-# ---------------- LOGIN FUNCTION ----------------
+# ---------------- LOGIN ----------------
 def login(u, p):
     res = supabase.table("users")\
         .select("*")\
@@ -58,7 +67,6 @@ def login(u, p):
         .execute()
     return res.data[0] if res.data else None
 
-# ---------------- PROFESSIONAL LOGIN UI ----------------
 if st.session_state.user is None:
 
     st.markdown("""
@@ -85,8 +93,8 @@ if st.session_state.user is None:
     st.markdown("<div class='login-box'>", unsafe_allow_html=True)
     st.markdown("<div class='login-title'>🔐 Secure Login</div>", unsafe_allow_html=True)
 
-    u = st.text_input("Username", key="login_user")
-    p = st.text_input("Password", type="password", key="login_pass")
+    u = st.text_input("Username")
+    p = st.text_input("Password", type="password")
 
     if st.button("Login", use_container_width=True):
         user = login(u, p)
@@ -97,7 +105,6 @@ if st.session_state.user is None:
             st.error("Invalid username or password")
 
     st.markdown("</div>", unsafe_allow_html=True)
-
     st.stop()
 
 user = st.session_state.user
@@ -120,13 +127,12 @@ with st.sidebar:
 # ---------------- HEADER ----------------
 st.markdown("<div class='main-title'>📊 Price Lookup System</div>", unsafe_allow_html=True)
 
-# ---------------- NORMALIZER ----------------
+# ---------------- HELPERS ----------------
 def norm(x):
     if pd.isna(x):
         return ""
     return str(x).replace(".0","").replace(" ","").replace("-","").replace("/","").strip().lower()
 
-# ---------------- SAFE NUMBER ----------------
 def safe(v, is_int=False):
     try:
         if v is None:
@@ -149,10 +155,8 @@ if page == "📊 Price Lookup":
     db_df["part_no"] = db_df["part_no"].astype(str).apply(norm)
     db_df["brand"] = db_df["brand"].astype(str).str.lower()
 
-    # ✅ BRAND LIST (OLD FEATURE RESTORED)
     brand_list = sorted(db_df["brand"].dropna().unique())
 
-    # ✅ TABLE INPUT (OLD UI RESTORED)
     input_df = st.data_editor(
         st.session_state.input_table,
         num_rows="dynamic",
@@ -203,7 +207,6 @@ if page == "📊 Price Lookup":
 
         st.session_state.table_data = pd.DataFrame(result)
 
-        # ✅ RESET INPUT TABLE (OLD FEATURE)
         st.session_state.input_table = pd.DataFrame(
             columns=["Brand","Part No","Qty"]
         )
