@@ -15,66 +15,77 @@ st.set_page_config(layout="wide")
 # ---------------- PREMIUM LIGHT UI ----------------
 st.markdown("""
 <style>
+/* FULL BACKGROUND */
 body {
-    background: linear-gradient(135deg, #eef2ff, #fdf2f8);
+    background: linear-gradient(135deg, #eef2ff, #fdf4ff);
 }
+
+/* MAIN CONTAINER */
 .block-container {
+    padding-top: 1rem;
     background: linear-gradient(135deg, #ffffff, #f8fafc);
-    padding: 20px;
     border-radius: 16px;
-    box-shadow: 0 6px 25px rgba(0,0,0,0.05);
+    padding: 20px;
 }
+
+/* SIDEBAR */
 section[data-testid="stSidebar"] {
-    background: linear-gradient(180deg, #6366f1, #818cf8);
+    background: linear-gradient(180deg, #6366f1, #8b5cf6);
 }
 section[data-testid="stSidebar"] * {
     color: white !important;
 }
+
+/* HEADER */
 .main-title {
-    font-size: 34px;
+    font-size: 36px;
     font-weight: 700;
-    color: #1e293b;
+    margin-bottom: 10px;
 }
+
+/* LOGIN BOX */
 .login-box {
-    width: 400px;
+    width: 420px;
     margin: auto;
     margin-top: 120px;
-    padding: 35px;
+    padding: 40px;
     background: linear-gradient(135deg, #ffffff, #eef2ff);
-    border-radius: 16px;
+    border-radius: 18px;
     box-shadow: 0 10px 40px rgba(0,0,0,0.08);
     text-align: center;
 }
+
+/* BUTTON */
 .stButton>button {
     background: linear-gradient(90deg, #6366f1, #3b82f6);
     color: white;
-    border-radius: 8px;
-    height: 40px;
+    border-radius: 10px;
+    height: 42px;
+    font-weight: 500;
 }
 </style>
 """, unsafe_allow_html=True)
 
-# ---------------- CACHE ----------------
-@st.cache_data(ttl=0)
+# ---------------- LOAD DATA ----------------
+@st.cache_data
 def load_parts():
-    try:
-        data = supabase.table("parts_table").select("*").execute()
-        return pd.DataFrame(data.data or [])
-    except:
-        return pd.DataFrame()
+    data = supabase.table("parts_table").select("*").execute()
+    return pd.DataFrame(data.data or [])
 
-# 🔥 NEW: ALWAYS FRESH BRANDS (NO CACHE)
+# 🔥 FIXED BRAND FETCH (NO CACHE ISSUE)
 def load_brands():
-    try:
-        data = supabase.table("parts_table").select("brand").execute()
-        df = pd.DataFrame(data.data or [])
-        if df.empty:
-            return []
-        return sorted(set(df["brand"].astype(str).str.strip().str.lower()))
-    except:
+    data = supabase.table("parts_table").select("brand").execute()
+    df = pd.DataFrame(data.data or [])
+    if df.empty:
         return []
+    return sorted(
+        df["brand"].astype(str).str.strip().str.lower().unique()
+    )
 
 # ---------------- SESSION ----------------
+if "user" not in st.session_state:
+    st.session_state.user = None
+
 if "table_data" not in st.session_state:
     st.session_state.table_data = pd.DataFrame(
         columns=["Brand","Part No","Description","Qty","Price","Amount"]
@@ -85,15 +96,12 @@ if "input_table" not in st.session_state:
         columns=["Brand","Part No","Qty"]
     )
 
-if "user" not in st.session_state:
-    st.session_state.user = None
-
 # ---------------- LOGIN ----------------
 def login(u, p):
     res = supabase.table("users")\
         .select("*")\
-        .eq("username", u.strip())\
-        .eq("password", p.strip())\
+        .eq("username", u)\
+        .eq("password", p)\
         .execute()
     return res.data[0] if res.data else None
 
@@ -101,8 +109,9 @@ if st.session_state.user is None:
 
     st.markdown("<div class='login-box'>", unsafe_allow_html=True)
 
+    # ✅ CENTER LOGO
     if os.path.exists("logo.png"):
-        st.image("logo.png", width=130)
+        st.image("logo.png", width=140)
 
     st.markdown("### 🔐 Login")
 
@@ -115,7 +124,7 @@ if st.session_state.user is None:
             st.session_state.user = user
             st.rerun()
         else:
-            st.error("Invalid username or password")
+            st.error("Invalid credentials")
 
     st.markdown("</div>", unsafe_allow_html=True)
     st.stop()
@@ -125,9 +134,11 @@ username = user["username"]
 
 # ---------------- SIDEBAR ----------------
 with st.sidebar:
+
     st.markdown(f"👤 Logged in: **{username}**")
 
     pages = ["📊 Price Lookup"]
+
     if username == "admin":
         pages += ["📤 Upload Data", "🛠 Admin Panel"]
 
@@ -144,39 +155,33 @@ st.markdown("<div class='main-title'>📊 Price Lookup System</div>", unsafe_all
 def norm(x):
     if pd.isna(x):
         return ""
-    return str(x).replace(".0","").replace(" ","").replace("-","").replace("/","").strip().lower()
+    return str(x).replace(".0","").replace(" ","").replace("-","").replace("/","").lower()
 
-# ---------------- PRICE PAGE ----------------
+# ================= PRICE LOOKUP =================
 if page == "📊 Price Lookup":
 
-    col1, col2 = st.columns([6,1])
-    with col2:
-        if st.button("🔄 Refresh"):
-            load_parts.clear()
-            st.cache_data.clear()
-            st.rerun()
+    if st.button("🔄 Refresh"):
+        load_parts.clear()
+        st.cache_data.clear()
+        st.rerun()
 
     db_df = load_parts()
 
-    if db_df.empty:
-        st.warning("No data found")
-        st.stop()
-
     db_df["part_no"] = db_df["part_no"].astype(str).apply(norm)
-    db_df["brand"] = db_df["brand"].astype(str).str.strip().str.lower()
+    db_df["brand"] = db_df["brand"].astype(str).str.lower().str.strip()
 
-    # 🔥 FIXED BRAND DROPDOWN
+    # ✅ FIXED DROPDOWN
     brand_list = load_brands()
 
     input_df = st.data_editor(
         st.session_state.input_table,
         num_rows="dynamic",
         use_container_width=True,
-        hide_index=True,
         column_config={
-            "Brand": st.column_config.SelectboxColumn("Brand", options=brand_list)
-        },
-        key="input_editor"
+            "Brand": st.column_config.SelectboxColumn(
+                "Brand", options=brand_list
+            )
+        }
     )
 
     if st.button("🔎 Fetch Prices"):
@@ -184,29 +189,29 @@ if page == "📊 Price Lookup":
         result = []
 
         for _, r in input_df.iterrows():
+
             part = norm(r.get("Part No"))
             brand = str(r.get("Brand","")).lower()
-            qty = pd.to_numeric(r.get("Qty"), errors="coerce")
-
-            if pd.isna(qty) or qty <= 0:
-                qty = 1
 
             match = db_df[
                 (db_df["part_no"] == part) &
                 (db_df["brand"] == brand)
             ]
 
+            qty = pd.to_numeric(r.get("Qty"), errors="coerce")
+            if pd.isna(qty) or qty <= 0:
+                qty = 1
+
             if not match.empty:
-                row = match.iloc[0]
-                price = float(row.get("price",0))
-                desc = row.get("description","N/A")
+                price = float(match.iloc[0]["price"])
+                desc = match.iloc[0].get("description","")
             else:
                 price = 0
                 desc = "Not Found"
 
             result.append({
-                "Brand": r.get("Brand"),
-                "Part No": r.get("Part No"),
+                "Brand": r["Brand"],
+                "Part No": r["Part No"],
                 "Description": desc,
                 "Qty": qty,
                 "Price": price,
@@ -215,21 +220,19 @@ if page == "📊 Price Lookup":
 
         st.session_state.table_data = pd.DataFrame(result)
 
-    df = st.session_state.table_data.copy()
+    df = st.session_state.table_data
 
     if not df.empty:
-        df["Amount"] = df["Qty"] * df["Price"]
         st.dataframe(df, use_container_width=True)
         st.markdown(f"### 💰 Total: € {df['Amount'].sum():.2f}")
 
-# ---------------- UPLOAD ----------------
+# ================= UPLOAD =================
 elif page == "📤 Upload Data" and username == "admin":
 
-    uploaded = st.file_uploader("Upload Excel", type=["xlsx"])
+    file = st.file_uploader("Upload Excel", type=["xlsx"])
 
-    if uploaded:
-
-        df = pd.read_excel(uploaded, dtype=str)
+    if file:
+        df = pd.read_excel(file, dtype=str)
         df.columns = df.columns.str.strip().str.lower()
 
         df = df.rename(columns={
@@ -240,35 +243,33 @@ elif page == "📤 Upload Data" and username == "admin":
             "moq": "moq"
         })
 
-        df["part_no"] = df["part_no"].astype(str).str.strip()
-        df["brand"] = df["brand"].astype(str).str.strip().str.lower()
+        df["brand"] = df["brand"].str.lower().str.strip()
         df["price"] = pd.to_numeric(df["price"], errors="coerce").fillna(0)
 
         data = df.to_dict(orient="records")
 
-        clean_data = []
-        for row in data:
-            clean_row = {}
-            for k, v in row.items():
-                if isinstance(v, float) and (pd.isna(v) or v == float("inf") or v == float("-inf")):
-                    clean_row[k] = None
+        # FIX NAN ERROR
+        clean = []
+        for r in data:
+            row = {}
+            for k,v in r.items():
+                if pd.isna(v):
+                    row[k] = None
                 else:
-                    clean_row[k] = v
-            clean_data.append(clean_row)
+                    row[k] = v
+            clean.append(row)
 
-        for i in range(0, len(clean_data), 200):
-            supabase.table("parts_table").insert(clean_data[i:i+200]).execute()
+        supabase.table("parts_table").insert(clean).execute()
 
-        st.success(f"Uploaded {len(clean_data)} rows")
-
-        load_parts.clear()
-        st.cache_data.clear()
+        st.success("Uploaded successfully")
         st.rerun()
 
-# ---------------- ADMIN ----------------
+# ================= ADMIN =================
 elif page == "🛠 Admin Panel" and username == "admin":
 
-    u = st.text_input("New user")
+    st.subheader("Add User")
+
+    u = st.text_input("Username")
     p = st.text_input("Password", type="password")
 
     if st.button("Add User"):
@@ -278,5 +279,15 @@ elif page == "🛠 Admin Panel" and username == "admin":
         }).execute()
         st.success("User added")
 
+    st.subheader("Remove User")
+
     users = supabase.table("users").select("username").execute().data
-    st.write([x["username"] for x in users])
+    user_list = [x["username"] for x in users if x["username"] != "admin"]
+
+    if user_list:
+        selected = st.selectbox("Select User", user_list)
+
+        if st.button("Delete User"):
+            supabase.table("users").delete().eq("username", selected).execute()
+            st.success("User deleted")
+            st.rerun()
