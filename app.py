@@ -3,6 +3,7 @@ import pandas as pd
 import psycopg2
 from psycopg2.extras import execute_values
 import math
+import re   # 🔥 added
 
 # ---------------- DB ----------------
 DATABASE_URL = "postgresql://parts_db_bi6b_user:vVxgefrTwrWGoHwzIPXbfemlrb4Fn6GW@dpg-d7o8oqgg4nts73aagbcg-a.oregon-postgres.render.com/parts_db_bi6b"
@@ -10,7 +11,7 @@ DATABASE_URL = "postgresql://parts_db_bi6b_user:vVxgefrTwrWGoHwzIPXbfemlrb4Fn6GW
 conn = psycopg2.connect(DATABASE_URL)
 cur = conn.cursor()
 
-# ---------------- UI (LIGHT GRADIENT PROFESSIONAL) ----------------
+# ---------------- UI ----------------
 st.set_page_config(layout="wide")
 
 st.markdown("""
@@ -113,8 +114,10 @@ with st.sidebar:
 
 # ---------------- HELPERS ----------------
 def norm(x):
-    if pd.isna(x): return ""
-    return str(x).replace(".0","").replace(" ","").lower()
+    if pd.isna(x):
+        return ""
+    x = str(x).lower().strip()
+    return re.sub(r'[^a-z0-9]', '', x)   # 🔥 UNIVERSAL NORMALIZATION
 
 def safe_float(v):
     try:
@@ -143,6 +146,10 @@ if page == "📊 Price Lookup":
     db_df["brand"] = db_df["brand"].astype(str).str.strip()
     brand_list = sorted(db_df["brand"].unique())
 
+    # 🔥 ADD NORMALIZED COLUMNS
+    db_df["part_norm"] = db_df["part_no"].apply(norm)
+    db_df["brand_norm"] = db_df["brand"].apply(norm)
+
     col1, col2 = st.columns([10,1])
     with col2:
         if st.button("🔄 Refresh"):
@@ -163,15 +170,17 @@ if page == "📊 Price Lookup":
         result = []
 
         for _, r in input_df.iterrows():
+
             part = norm(r.get("Part No"))
-            brand = str(r.get("Brand","")).strip()
+            brand = norm(r.get("Brand"))
 
             qty = pd.to_numeric(r.get("Qty"), errors="coerce")
-            if pd.isna(qty) or qty<=0: qty = 1
+            if pd.isna(qty) or qty<=0:
+                qty = 1
 
             match = db_df[
-                (db_df["part_no"].astype(str).apply(norm)==part) &
-                (db_df["brand"].str.lower()==brand.lower())
+                (db_df["part_norm"] == part) &
+                (db_df["brand_norm"] == brand)
             ]
 
             if not match.empty:
@@ -183,12 +192,12 @@ if page == "📊 Price Lookup":
                 desc = "Not Found"
 
             result.append({
-                "Brand": brand,
-                "Part No": r["Part No"],
+                "Brand": r.get("Brand"),
+                "Part No": r.get("Part No"),
                 "Description": desc,
                 "Qty": qty,
                 "Price": price,
-                "Amount": qty*price
+                "Amount": qty * price
             })
 
         st.session_state.table_data = pd.DataFrame(result)
@@ -242,7 +251,6 @@ elif page == "📤 Upload Data":
             VALUES %s
             """
 
-            # ⚡ FAST BULK INSERT
             execute_values(cur, query, values)
             conn.commit()
 
