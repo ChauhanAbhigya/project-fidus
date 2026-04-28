@@ -12,133 +12,117 @@ supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 st.set_page_config(layout="wide")
 
-# ---------------- PREMIUM LIGHT UI ----------------
+# ---------------- PREMIUM UI (FIXED) ----------------
 st.markdown("""
 <style>
-/* FULL BACKGROUND */
-body {
-    background: linear-gradient(135deg, #eef2ff, #fdf4ff);
-}
 
-/* MAIN CONTAINER */
-.block-container {
-    padding-top: 1rem;
-    background: linear-gradient(135deg, #ffffff, #f8fafc);
-    border-radius: 16px;
-    padding: 20px;
+/* FULL PAGE GRADIENT FIX */
+[data-testid="stAppViewContainer"] {
+    background: linear-gradient(135deg, #f5f7ff, #eef2ff);
 }
 
 /* SIDEBAR */
 section[data-testid="stSidebar"] {
-    background: linear-gradient(180deg, #6366f1, #8b5cf6);
+    background: linear-gradient(180deg, #667eea, #764ba2);
 }
 section[data-testid="stSidebar"] * {
     color: white !important;
 }
 
-/* HEADER */
-.main-title {
-    font-size: 36px;
-    font-weight: 700;
-    margin-bottom: 10px;
-}
-
-/* LOGIN BOX */
-.login-box {
-    width: 420px;
-    margin: auto;
-    margin-top: 120px;
-    padding: 40px;
-    background: linear-gradient(135deg, #ffffff, #eef2ff);
-    border-radius: 18px;
-    box-shadow: 0 10px 40px rgba(0,0,0,0.08);
-    text-align: center;
+/* CARD UI */
+.block {
+    background: white;
+    padding: 18px;
+    border-radius: 12px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.05);
 }
 
 /* BUTTON */
 .stButton>button {
-    background: linear-gradient(90deg, #6366f1, #3b82f6);
+    background: linear-gradient(90deg, #667eea, #5a67d8);
     color: white;
-    border-radius: 10px;
-    height: 42px;
-    font-weight: 500;
+    border-radius: 8px;
+    height: 40px;
+    border: none;
 }
+
+/* TITLE FIX */
+.main-title {
+    font-size: 30px;
+    font-weight: 700;
+    color: #1a237e;
+}
+
+/* LOGIN CENTER FIX */
+.login-box {
+    max-width: 400px;
+    margin: auto;
+    margin-top: 80px;
+    padding: 30px;
+    border-radius: 14px;
+    background: white;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.08);
+    text-align: center;
+}
+
 </style>
 """, unsafe_allow_html=True)
 
-# ---------------- LOAD DATA ----------------
+# ---------------- CACHE ----------------
 @st.cache_data
 def load_parts():
     data = supabase.table("parts_table").select("*").execute()
-    return pd.DataFrame(data.data or [])
-
-# 🔥 FIXED BRAND FETCH (NO CACHE ISSUE)
-def load_brands():
-    data = supabase.table("parts_table").select("brand").execute()
     df = pd.DataFrame(data.data or [])
-    if df.empty:
-        return []
-    return sorted(
-        df["brand"].astype(str).str.strip().str.lower().unique()
-    )
+    if not df.empty:
+        df["brand"] = df["brand"].astype(str).str.strip().str.lower()
+    return df
 
-# ---------------- SESSION ----------------
+# ---------------- LOGIN ----------------
 if "user" not in st.session_state:
     st.session_state.user = None
 
-if "table_data" not in st.session_state:
-    st.session_state.table_data = pd.DataFrame(
-        columns=["Brand","Part No","Description","Qty","Price","Amount"]
-    )
-
-if "input_table" not in st.session_state:
-    st.session_state.input_table = pd.DataFrame(
-        columns=["Brand","Part No","Qty"]
-    )
-
-# ---------------- LOGIN ----------------
 def login(u, p):
     res = supabase.table("users")\
         .select("*")\
-        .eq("username", u)\
-        .eq("password", p)\
+        .eq("username", u.strip())\
+        .eq("password", p.strip())\
         .execute()
     return res.data[0] if res.data else None
 
+# ---------------- LOGIN UI ----------------
 if st.session_state.user is None:
 
     st.markdown("<div class='login-box'>", unsafe_allow_html=True)
 
-    # ✅ CENTER LOGO
+    # CENTER LOGO
     if os.path.exists("logo.png"):
-        st.image("logo.png", width=140)
+        st.image("logo.png", width=150)
 
     st.markdown("### 🔐 Login")
 
     u = st.text_input("Username")
     p = st.text_input("Password", type="password")
 
-    if st.button("Login", use_container_width=True):
+    if st.button("Login"):
         user = login(u, p)
         if user:
             st.session_state.user = user
             st.rerun()
         else:
-            st.error("Invalid credentials")
+            st.error("Invalid username or password")
 
     st.markdown("</div>", unsafe_allow_html=True)
     st.stop()
 
+# ---------------- USER ----------------
 user = st.session_state.user
 username = user["username"]
 
 # ---------------- SIDEBAR ----------------
 with st.sidebar:
-
     st.markdown(f"👤 Logged in: **{username}**")
 
     pages = ["📊 Price Lookup"]
-
     if username == "admin":
         pages += ["📤 Upload Data", "🛠 Admin Panel"]
 
@@ -155,31 +139,36 @@ st.markdown("<div class='main-title'>📊 Price Lookup System</div>", unsafe_all
 def norm(x):
     if pd.isna(x):
         return ""
-    return str(x).replace(".0","").replace(" ","").replace("-","").replace("/","").lower()
+    return str(x).replace(".0","").replace(" ","").replace("-","").replace("/","").strip().lower()
 
-# ================= PRICE LOOKUP =================
+def safe(v):
+    try:
+        if v is None or (isinstance(v,float) and (math.isnan(v) or math.isinf(v))):
+            return 0
+        return float(v)
+    except:
+        return 0
+
+# ========================= PRICE PAGE =========================
 if page == "📊 Price Lookup":
 
-    if st.button("🔄 Refresh"):
-        load_parts.clear()
+    if st.button("🔄 Refresh Data"):
         st.cache_data.clear()
         st.rerun()
 
     db_df = load_parts()
 
-    db_df["part_no"] = db_df["part_no"].astype(str).apply(norm)
-    db_df["brand"] = db_df["brand"].astype(str).str.lower().str.strip()
-
-    # ✅ FIXED DROPDOWN
-    brand_list = load_brands()
+    # ✅ BRAND FIX (REAL FIX)
+    brand_list = sorted(db_df["brand"].dropna().unique().tolist())
 
     input_df = st.data_editor(
-        st.session_state.input_table,
+        pd.DataFrame(columns=["Brand","Part No","Qty"]),
         num_rows="dynamic",
         use_container_width=True,
         column_config={
             "Brand": st.column_config.SelectboxColumn(
-                "Brand", options=brand_list
+                "Brand",
+                options=brand_list
             )
         }
     )
@@ -192,26 +181,27 @@ if page == "📊 Price Lookup":
 
             part = norm(r.get("Part No"))
             brand = str(r.get("Brand","")).lower()
-
-            match = db_df[
-                (db_df["part_no"] == part) &
-                (db_df["brand"] == brand)
-            ]
-
             qty = pd.to_numeric(r.get("Qty"), errors="coerce")
+
             if pd.isna(qty) or qty <= 0:
                 qty = 1
 
+            match = db_df[
+                (db_df["part_no"].astype(str).apply(norm) == part) &
+                (db_df["brand"] == brand)
+            ]
+
             if not match.empty:
-                price = float(match.iloc[0]["price"])
-                desc = match.iloc[0].get("description","")
+                row = match.iloc[0]
+                price = safe(row.get("price"))
+                desc = row.get("description","N/A")
             else:
                 price = 0
                 desc = "Not Found"
 
             result.append({
-                "Brand": r["Brand"],
-                "Part No": r["Part No"],
+                "Brand": r.get("Brand"),
+                "Part No": r.get("Part No"),
                 "Description": desc,
                 "Qty": qty,
                 "Price": price,
@@ -220,52 +210,48 @@ if page == "📊 Price Lookup":
 
         st.session_state.table_data = pd.DataFrame(result)
 
-    df = st.session_state.table_data
+    if "table_data" in st.session_state:
+        df = st.session_state.table_data
 
-    if not df.empty:
         st.dataframe(df, use_container_width=True)
+
         st.markdown(f"### 💰 Total: € {df['Amount'].sum():.2f}")
 
-# ================= UPLOAD =================
-elif page == "📤 Upload Data" and username == "admin":
+# ========================= UPLOAD =========================
+elif page == "📤 Upload Data":
 
-    file = st.file_uploader("Upload Excel", type=["xlsx"])
+    uploaded = st.file_uploader("Upload Excel", type=["xlsx"], accept_multiple_files=True)
 
-    if file:
-        df = pd.read_excel(file, dtype=str)
-        df.columns = df.columns.str.strip().str.lower()
+    if uploaded:
+        total = 0
 
-        df = df.rename(columns={
-            "part no": "part_no",
-            "brand": "brand",
-            "price [eur]": "price",
-            "item description": "description",
-            "moq": "moq"
-        })
+        for f in uploaded:
 
-        df["brand"] = df["brand"].str.lower().str.strip()
-        df["price"] = pd.to_numeric(df["price"], errors="coerce").fillna(0)
+            df = pd.read_excel(f)
 
-        data = df.to_dict(orient="records")
+            df.columns = df.columns.str.strip().str.lower()
 
-        # FIX NAN ERROR
-        clean = []
-        for r in data:
-            row = {}
-            for k,v in r.items():
-                if pd.isna(v):
-                    row[k] = None
-                else:
-                    row[k] = v
-            clean.append(row)
+            df = df.rename(columns={
+                "part no": "part_no",
+                "price [eur]": "price",
+                "item description": "description"
+            })
 
-        supabase.table("parts_table").insert(clean).execute()
+            df["brand"] = df["brand"].astype(str).str.lower()
 
-        st.success("Uploaded successfully")
-        st.rerun()
+            # ✅ FINAL FIX FOR NAN ERROR
+            df = df.fillna(0)
 
-# ================= ADMIN =================
-elif page == "🛠 Admin Panel" and username == "admin":
+            data = df.to_dict(orient="records")
+
+            supabase.table("parts_table").insert(data).execute()
+
+            total += len(data)
+
+        st.success(f"Uploaded {total} rows")
+
+# ========================= ADMIN =========================
+elif page == "🛠 Admin Panel":
 
     st.subheader("Add User")
 
@@ -285,9 +271,8 @@ elif page == "🛠 Admin Panel" and username == "admin":
     user_list = [x["username"] for x in users if x["username"] != "admin"]
 
     if user_list:
-        selected = st.selectbox("Select User", user_list)
+        del_user = st.selectbox("Select user", user_list)
 
         if st.button("Delete User"):
-            supabase.table("users").delete().eq("username", selected).execute()
+            supabase.table("users").delete().eq("username", del_user).execute()
             st.success("User deleted")
-            st.rerun()
