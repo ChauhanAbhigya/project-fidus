@@ -87,7 +87,6 @@ if st.session_state.user is None:
 
     st.markdown("<div class='login-box'>", unsafe_allow_html=True)
 
-    # LOGO
     if os.path.exists("logo.png"):
         st.markdown("<div class='logo-container'>", unsafe_allow_html=True)
         st.image("logo.png", width=120)
@@ -300,6 +299,10 @@ elif page == "📤 Upload Data" and username == "admin":
         df["part_no"] = df["part_no"].astype(str).apply(norm)
         df["brand"] = df["brand"].astype(str).str.lower()
         df["price"] = pd.to_numeric(df["price"], errors="coerce").fillna(0)
+
+        # ✅ FINAL FIX FOR NAN ERROR
+        df = df.replace([float("inf"), -float("inf")], None)
+        df = df.where(pd.notnull(df), None)
 
         data = df.to_dict(orient="records")
 
