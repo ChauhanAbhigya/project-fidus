@@ -1,23 +1,53 @@
-from supabase import create_client
 import streamlit as st
 import pandas as pd
+import psycopg2
 import os
 import math
 
-# ---------------- SUPABASE ----------------
-SUPABASE_URL = "https://eicwssbhjfvekaerjljm.supabase.co"
-SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVpY3dzc2JoamZ2ZWthZXJqbGptIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcyNzI1NTUsImV4cCI6MjA5Mjg0ODU1NX0.okPnbQrcKN6A2-Xj_99TgB47mtx9H6KO20asriBA19g"
+# ---------------- POSTGRES ----------------
+DATABASE_URL = "postgresql://parts_db_bi6b_user:vVxgefrTwrWGoHwzIPXbfemlrb4Fn6GW@dpg-d7o8oqgg4nts73aagbcg-a.oregon-postgres.render.com/parts_db_bi6b"
 
-supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+conn = psycopg2.connect(DATABASE_URL)
+cur = conn.cursor()
+# ---------------- AUTO CREATE TABLES ----------------
+cur.execute("""
+CREATE TABLE IF NOT EXISTS parts_table (
+    id SERIAL PRIMARY KEY,
+    part_no TEXT,
+    brand TEXT,
+    price NUMERIC,
+    description TEXT,
+    moq INTEGER
+);
+""")
+
+cur.execute("""
+CREATE TABLE IF NOT EXISTS users (
+    id SERIAL PRIMARY KEY,
+    username TEXT UNIQUE,
+    password TEXT
+);
+""")
+
+# create admin if not exists
+cur.execute("""
+INSERT INTO users (username, password)
+SELECT 'admin', 'admin'
+WHERE NOT EXISTS (
+    SELECT 1 FROM users WHERE username='admin'
+);
+""")
+
+conn.commit()
+
 
 st.set_page_config(layout="wide")
 
 # ---------------- CACHE ----------------
 @st.cache_data
 def load_parts():
-    data = supabase.table("parts_table").select("*").execute()
-    df = pd.DataFrame(data.data or [])
-    df.columns = df.columns.str.lower()   # 🔥 FIX
+    df = pd.read_sql("SELECT * FROM parts_table", conn)
+    df.columns = df.columns.str.lower()
     return df
 
 # ---------------- SESSION ----------------
@@ -36,12 +66,12 @@ if "user" not in st.session_state:
     st.session_state.user = None
 
 def login(u, p):
-    res = supabase.table("users")\
-        .select("*")\
-        .eq("username", u.strip())\
-        .eq("password", p.strip())\
-        .execute()
-    return res.data[0] if res.data else None
+    query = "SELECT * FROM users WHERE username=%s AND password=%s LIMIT 1"
+    cur.execute(query, (u.strip(), p.strip()))
+    res = cur.fetchone()
+    if res:
+        return {"username": res[1]}
+    return None
 
 if st.session_state.user is None:
     st.title("🔐 Login")
@@ -107,13 +137,11 @@ if page == "📊 Price Lookup":
         st.warning("No data found")
         st.stop()
 
-    # 🔥 CLEAN BRAND
     db_df["brand"] = db_df["brand"].astype(str).str.strip()
     db_df = db_df[db_df["brand"] != ""]
 
     brand_list = sorted(db_df["brand"].unique().tolist())
 
-    # 🔥 REFRESH BUTTON
     col1, col2 = st.columns([10,1])
     with col2:
         if st.button("🔄"):
@@ -125,10 +153,7 @@ if page == "📊 Price Lookup":
         num_rows="dynamic",
         use_container_width=True,
         column_config={
-            "Brand": st.column_config.SelectboxColumn(
-                "Brand",
-                options=brand_list
-            )
+            "Brand": st.column_config.SelectboxColumn("Brand", options=brand_list)
         },
         key="input_editor"
     )
@@ -146,15 +171,18 @@ if page == "📊 Price Lookup":
             if pd.isna(qty) or qty <= 0:
                 qty = 1
 
-            match = db_df[
-                (db_df["part_no"].astype(str).apply(norm) == part) &
-                (db_df["brand"].str.lower() == brand.lower())
-            ]
+            cur.execute("""
+                SELECT price, description
+                FROM parts_table
+                WHERE LOWER(brand) = %s AND LOWER(part_no) = %s
+                LIMIT 1
+            """, (brand.lower(), part))
 
-            if not match.empty:
-                row = match.iloc[0]
-                price = safe_float(row.get("price"))
-                desc = row.get("description","N/A")
+            row = cur.fetchone()
+
+            if row:
+                price = safe_float(row[0])
+                desc = row[1] if row[1] else "N/A"
             else:
                 price = 0
                 desc = "Not Found"
@@ -177,7 +205,6 @@ if page == "📊 Price Lookup":
     df["Amount"] = df["Qty"] * df["Price"]
 
     st.dataframe(df, use_container_width=True)
-
     st.markdown(f"### 💰 Total: € {df['Amount'].sum():.2f}")
 
 # ================= UPLOAD =================
@@ -193,7 +220,6 @@ elif page == "📤 Upload Data":
             df = pd.read_excel(f)
             df.columns = df.columns.str.strip().str.lower()
 
-            # 🔥 UNIVERSAL COLUMN MAP
             col_map = {
                 "part no": "part_no",
                 "part number": "part_no",
@@ -203,7 +229,6 @@ elif page == "📤 Upload Data":
 
             df.rename(columns=col_map, inplace=True)
 
-            # ensure required
             for col in ["part_no","brand","price"]:
                 if col not in df.columns:
                     df[col] = None
@@ -212,26 +237,29 @@ elif page == "📤 Upload Data":
             df["brand"] = df["brand"].astype(str).str.strip()
             df["price"] = pd.to_numeric(df["price"], errors="coerce").fillna(0)
 
-            df = df[
-                (df["part_no"] != "") &
-                (df["brand"] != "")
-            ]
+            df = df[(df["part_no"] != "") & (df["brand"] != "")]
 
-            # 🔥 REMOVE NaN / INF
             df = df.replace([float("inf"), -float("inf")], 0)
             df = df.fillna(0)
 
             records = df.to_dict(orient="records")
 
-            # 🔥 BATCH INSERT
             for i in range(0, len(records), 200):
                 chunk = records[i:i+200]
 
-                # 🔥 FIX INTEGER ISSUE
                 for r in chunk:
-                    r["price"] = safe_float(r.get("price"))
+                    cur.execute("""
+                        INSERT INTO parts_table (part_no, brand, price, description, moq)
+                        VALUES (%s, %s, %s, %s, %s)
+                    """, (
+                        r.get("part_no"),
+                        r.get("brand"),
+                        safe_float(r.get("price")),
+                        r.get("description"),
+                        safe_int(r.get("moq"))
+                    ))
 
-                supabase.table("parts_table").insert(chunk).execute()
+                conn.commit()
 
             total += len(records)
 
@@ -248,20 +276,21 @@ elif page == "🛠 Admin Panel":
     p = st.text_input("Password", type="password")
 
     if st.button("Add User"):
-        supabase.table("users").insert({
-            "username": u,
-            "password": p
-        }).execute()
+        cur.execute("INSERT INTO users (username, password) VALUES (%s, %s)", (u, p))
+        conn.commit()
         st.success("User added")
 
     st.subheader("Remove User")
 
-    users = supabase.table("users").select("username").execute().data
-    user_list = [x["username"] for x in users if x["username"] != "admin"]
+    cur.execute("SELECT username FROM users")
+    users = cur.fetchall()
+
+    user_list = [x[0] for x in users if x[0] != "admin"]
 
     if user_list:
         del_user = st.selectbox("Select user", user_list)
 
         if st.button("Delete User"):
-            supabase.table("users").delete().eq("username", del_user).execute()
+            cur.execute("DELETE FROM users WHERE username=%s", (del_user,))
+            conn.commit()
             st.success("User deleted")
