@@ -12,37 +12,33 @@ supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 st.set_page_config(layout="wide")
 
-# ---------------- SAFE CLEANERS ----------------
-def safe_str(x):
-    if pd.isna(x):
-        return ""
-    return str(x).strip()
+# ---------------- UI STYLE ONLY ----------------
+st.markdown("""
+<style>
+.stApp {
+    background: linear-gradient(135deg, #0f172a, #1e293b, #0f172a);
+    color: white;
+    font-family: 'Segoe UI';
+}
 
-def safe_float(x):
-    try:
-        if pd.isna(x):
-            return 0.0
-        v = float(x)
-        if math.isnan(v) or math.isinf(v):
-            return 0.0
-        return v
-    except:
-        return 0.0
+.main-title {
+    font-size: 32px;
+    font-weight: 700;
+    background: linear-gradient(90deg, #00c6ff, #0072ff);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
 
-def safe_int(x):
-    try:
-        if pd.isna(x):
-            return 0
-        return int(float(x))
-    except:
-        return 0
+.stButton>button {
+    background: linear-gradient(90deg, #00c6ff, #0072ff);
+    color: white;
+    border-radius: 10px;
+    font-weight: 600;
+}
+</style>
+""", unsafe_allow_html=True)
 
-def norm(x):
-    if pd.isna(x):
-        return ""
-    return str(x).replace(".0","").replace(" ","").replace("-","").replace("/","").lstrip("0").strip().lower()
-
-# ---------------- LOAD DATA ----------------
+# ---------------- CACHE ----------------
 @st.cache_data(ttl=0)
 def load_parts():
     data = supabase.table("parts_table").select("*").execute()
@@ -60,7 +56,7 @@ if "user" not in st.session_state:
     st.session_state.user = None
 
 def login(u, p):
-    res = supabase.table("users").select("*").eq("username", u.strip()).eq("password", p.strip()).execute()
+    res = supabase.table("users").select("*").eq("username", u).eq("password", p).execute()
     return res.data[0] if res.data else None
 
 if st.session_state.user is None:
@@ -75,11 +71,9 @@ if st.session_state.user is None:
             st.rerun()
         else:
             st.error("Invalid login")
-
     st.stop()
 
-user = st.session_state.user
-username = user["username"]
+username = st.session_state.user["username"]
 
 # ---------------- SIDEBAR ----------------
 with st.sidebar:
@@ -96,58 +90,63 @@ with st.sidebar:
         st.rerun()
 
 # ---------------- HEADER ----------------
-col1, col2 = st.columns([1,7])
+col1, col2 = st.columns([1,8])
 
 with col1:
     if os.path.exists("logo.png"):
-        st.image("logo.png", width=100)
+        st.image("logo.png", width=80)
 
 with col2:
-    st.title("📊 Price Lookup System")
+    st.markdown("<div class='main-title'>📊 Price Lookup System</div>", unsafe_allow_html=True)
 
-# ================= PRICE LOOKUP =================
+# ---------------- NORMALIZER ----------------
+def norm(x):
+    if pd.isna(x):
+        return ""
+    return str(x).replace(".0","").replace(" ","").replace("-","").replace("/","").lstrip("0").strip().lower()
+
+# ================= PRICE PAGE =================
 if page == "📊 Price Lookup":
+
+    col1, col2 = st.columns([9,1])
+
+    with col2:
+        if st.button("🔄"):
+            st.cache_data.clear()
+            st.rerun()
 
     db_df = load_parts()
 
     if db_df.empty:
-        st.warning("No data")
+        st.warning("No data found")
         st.stop()
 
     db_df["part_no"] = db_df["part_no"].astype(str).apply(norm)
     db_df["brand"] = db_df["brand"].astype(str).str.lower()
 
-    input_df = st.data_editor(st.session_state.input_table, num_rows="dynamic", key="editor")
+    input_df = st.data_editor(st.session_state.input_table, num_rows="dynamic")
 
-    if st.button("Fetch Prices"):
-
+    if st.button("🔎 Fetch Prices"):
         result = []
 
-        for _, row in input_df.iterrows():
-
-            part = norm(row.get("Part No",""))
-            brand = str(row.get("Brand","")).lower()
-            qty = safe_float(row.get("Qty"))
-
-            if not part:
-                continue
-
-            if qty <= 0:
-                qty = 1
+        for _, r in input_df.iterrows():
+            part = norm(r["Part No"])
+            brand = str(r["Brand"]).lower()
+            qty = float(r["Qty"] or 1)
 
             match = db_df[(db_df["part_no"] == part) & (db_df["brand"] == brand)]
 
             if not match.empty:
-                r = match.iloc[0]
-                price = safe_float(r.get("price"))
-                desc = safe_str(r.get("description"))
+                row = match.iloc[0]
+                price = float(row["price"])
+                desc = row.get("description", "")
             else:
                 price = 0
-                desc = "Not Found"
+                desc = "Not found"
 
             result.append({
-                "Brand": row.get("Brand"),
-                "Part No": row.get("Part No"),
+                "Brand": r["Brand"],
+                "Part No": r["Part No"],
                 "Description": desc,
                 "Qty": qty,
                 "Price": price,
@@ -158,88 +157,92 @@ if page == "📊 Price Lookup":
 
     df = st.session_state.table_data.copy()
 
-    df["Qty"] = df["Qty"].apply(safe_float)
-    df["Price"] = df["Price"].apply(safe_float)
+    df["Qty"] = pd.to_numeric(df["Qty"], errors="coerce").fillna(0)
+    df["Price"] = pd.to_numeric(df["Price"], errors="coerce").fillna(0)
     df["Amount"] = df["Qty"] * df["Price"]
 
-    st.dataframe(df)
+    st.dataframe(df, use_container_width=True)
+    st.markdown(f"### 💰 Total: € {df['Amount'].sum():.2f}")
 
-    st.write("Total:", df["Amount"].sum())
+    # ---------------- SAVE OFFER ----------------
+    if st.button("💾 Save Offer"):
 
-    if st.button("Save Offer"):
+        batch = []
 
-        safe_rows = []
+        for _, row in df.iterrows():
 
-        for _, r in df.iterrows():
-            safe_rows.append({
+            batch.append({
                 "username": username,
-                "brand": safe_str(r["Brand"]),
-                "part_no": safe_str(r["Part No"]),
-                "qty": safe_float(r["Qty"]),
-                "price": safe_float(r["Price"]),
-                "amount": safe_float(r["Amount"])
+                "brand": str(row["Brand"]),
+                "part_no": str(row["Part No"]),
+                "qty": float(row["Qty"] or 0),
+                "price": float(row["Price"] or 0),
+                "amount": float(row["Amount"] or 0)
             })
 
-        # FIX: batch insert (prevents timeout)
-        for i in range(0, len(safe_rows), 50):
-            supabase.table("offer_items").insert(safe_rows[i:i+50]).execute()
+        # 🚀 FAST BULK INSERT (FIX SPEED ISSUE)
+        BATCH_SIZE = 100
 
-        st.success("Saved")
+        for i in range(0, len(batch), BATCH_SIZE):
+            supabase.table("offer_items").insert(batch[i:i+BATCH_SIZE]).execute()
 
-# ================= UPLOAD =================
+        st.success("Saved successfully")
+
+# ================= UPLOAD PAGE (FAST VERSION) =================
 elif page == "📤 Upload Data" and username == "admin":
 
-    uploaded = st.file_uploader("Upload Excel", type=["xlsx"], accept_multiple_files=True)
+    st.title("📤 Upload Excel")
 
-    if uploaded:
+    files = st.file_uploader("Upload", type=["xlsx"], accept_multiple_files=True)
 
-        all_data = []
+    if files:
 
-        for file in uploaded:
+        total = 0
+        progress = st.progress(0)
 
-            df = pd.read_excel(file)
+        for i, f in enumerate(files):
+
+            df = pd.read_excel(f)
 
             df.columns = df.columns.str.strip().str.lower()
 
-            # UNIVERSAL mapping
-            df = df.rename(columns={
+            df.rename(columns={
                 "part no": "part_no",
                 "price [eur]": "price",
                 "item description": "description",
                 "moq": "moq"
-            })
+            }, inplace=True)
 
-            for col in ["part_no", "brand", "price"]:
-                if col not in df.columns:
-                    df[col] = ""
+            df = df[["part_no","brand","price","description","moq"]]
 
-            if "description" not in df.columns:
-                df["description"] = ""
-
-            if "moq" not in df.columns:
-                df["moq"] = 0
-
-            df["part_no"] = df["part_no"].apply(norm)
+            df["part_no"] = df["part_no"].astype(str).apply(norm)
             df["brand"] = df["brand"].astype(str).str.lower()
-            df["price"] = df["price"].apply(safe_float)
-            df["moq"] = df["moq"].apply(safe_int)
 
+            df["price"] = pd.to_numeric(df["price"], errors="coerce").fillna(0)
+
+            df = df.replace([float("inf"), -float("inf")], 0)
             df = df.fillna("")
 
             records = df.to_dict("records")
-            all_data.extend(records)
 
-        # FIX: batch insert (avoid timeout)
-        for i in range(0, len(all_data), 50):
-            supabase.table("parts_table").insert(all_data[i:i+50]).execute()
+            # 🚀 BULK INSERT SPEED FIX
+            for j in range(0, len(records), 200):
+                supabase.table("parts_table").insert(records[j:j+200]).execute()
 
-        st.success(f"Uploaded {len(all_data)} rows")
+            total += len(records)
+            progress.progress((i+1)/len(files))
+
+        st.success(f"Uploaded {total} rows")
+        st.cache_data.clear()
+        st.rerun()
 
 # ================= ADMIN =================
 elif page == "🛠 Admin Panel" and username == "admin":
 
-    u = st.text_input("New User")
-    p = st.text_input("Pass", type="password")
+    st.subheader("Admin Panel")
+
+    u = st.text_input("New user")
+    p = st.text_input("Password")
 
     if st.button("Add"):
         supabase.table("users").insert({"username": u, "password": p}).execute()
