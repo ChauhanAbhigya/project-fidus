@@ -5,8 +5,8 @@ import os
 import math
 
 # ---------------- SUPABASE ----------------
-SUPABASE_URL = os.getenv("SUPABASE_URL", "https://eicwssbhjfvekaerjljm.supabase.co")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVpY3dzc2JoamZ2ZWthZXJqbGptIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcyNzI1NTUsImV4cCI6MjA5Mjg0ODU1NX0.okPnbQrcKN6A2-Xj_99TgB47mtx9H6KO20asriBA19g")
+SUPABASE_URL = "https://eicwssbhjfvekaerjljm.supabase.co"
+SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVpY3dzc2JoamZ2ZWthZXJqbGptIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcyNzI1NTUsImV4cCI6MjA5Mjg0ODU1NX0.okPnbQrcKN6A2-Xj_99TgB47mtx9H6KO20asriBA19g"
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
@@ -79,18 +79,13 @@ if st.session_state.user is None:
         margin-bottom: 20px;
         color: #1a237e;
     }
-    .logo-container {
-        margin-bottom: 10px;
-    }
     </style>
     """, unsafe_allow_html=True)
 
     st.markdown("<div class='login-box'>", unsafe_allow_html=True)
 
     if os.path.exists("logo.png"):
-        st.markdown("<div class='logo-container'>", unsafe_allow_html=True)
         st.image("logo.png", width=120)
-        st.markdown("</div>", unsafe_allow_html=True)
 
     st.markdown("<div class='login-title'>Price Lookup System</div>", unsafe_allow_html=True)
 
@@ -164,9 +159,7 @@ if page == "📊 Price Lookup":
         use_container_width=True,
         hide_index=True,
         column_config={
-            "Brand": st.column_config.SelectboxColumn("Brand", options=brand_list),
-            "Part No": st.column_config.TextColumn("Part No"),
-            "Qty": st.column_config.NumberColumn("Qty", min_value=1, step=1)
+            "Brand": st.column_config.SelectboxColumn("Brand", options=brand_list)
         },
         key="input_editor"
     )
@@ -215,11 +208,6 @@ if page == "📊 Price Lookup":
             })
 
         st.session_state.table_data = pd.DataFrame(result)
-
-        st.session_state.input_table = pd.DataFrame(
-            columns=["Brand","Part No","Qty"]
-        )
-
         st.success("Prices fetched successfully")
 
     df = st.session_state.table_data.copy()
@@ -230,52 +218,27 @@ if page == "📊 Price Lookup":
         df["Price"] = pd.to_numeric(df["Price"], errors="coerce").fillna(0)
         df["Amount"] = df["Qty"] * df["Price"]
 
-        df = df.reset_index(drop=True)
-        df.index = df.index + 1
-
-        def highlight_rows(row):
-            if row["Price"] == 0:
-                return ["background-color: #ffe6e6"] * len(row)
-            return [""] * len(row)
-
-        st.dataframe(
-            df.style.apply(highlight_rows, axis=1),
-            use_container_width=True
-        )
-
-        total = df["Amount"].sum()
-        st.markdown(f"### 💰 Total Amount: € {total:.2f}")
+        st.dataframe(df, use_container_width=True)
+        st.markdown(f"### 💰 Total Amount: € {df['Amount'].sum():.2f}")
 
     if st.button("💾 Save Offer"):
 
-        if df.empty:
-            st.warning("No data to save")
-        else:
+        records = []
 
-            if df.duplicated(["Brand","Part No"]).any():
-                st.warning("⚠ Duplicate items found. Please review before saving.")
-
-            records = []
-
-            for _, r in df.iterrows():
-                records.append({
-                    "username": username,
-                    "brand": r["Brand"],
-                    "part_no": r["Part No"],
-                    "qty": safe(r["Qty"], True),
-                    "price": safe(r["Price"]),
-                    "amount": safe(r["Amount"])
-                })
-
-            for i in range(0, len(records), 200):
-                supabase.table("offer_items").insert(records[i:i+200]).execute()
-
-            supabase.table("logs").insert({
+        for _, r in df.iterrows():
+            records.append({
                 "username": username,
-                "action": f"Saved {len(df)} items"
-            }).execute()
+                "brand": r["Brand"],
+                "part_no": r["Part No"],
+                "qty": safe(r["Qty"], True),
+                "price": safe(r["Price"]),
+                "amount": safe(r["Amount"])
+            })
 
-            st.success("Saved successfully")
+        for i in range(0, len(records), 200):
+            supabase.table("offer_items").insert(records[i:i+200]).execute()
+
+        st.success("Saved")
 
 # ---------------- UPLOAD ----------------
 elif page == "📤 Upload Data" and username == "admin":
@@ -285,7 +248,6 @@ elif page == "📤 Upload Data" and username == "admin":
     if uploaded:
 
         df = pd.read_excel(uploaded, dtype=str)
-
         df.columns = df.columns.str.strip().str.lower()
 
         df = df.rename(columns={
@@ -300,24 +262,28 @@ elif page == "📤 Upload Data" and username == "admin":
         df["brand"] = df["brand"].astype(str).str.lower()
         df["price"] = pd.to_numeric(df["price"], errors="coerce").fillna(0)
 
-        # ✅ FINAL FIX FOR NAN ERROR
-        df = df.replace([float("inf"), -float("inf")], None)
-        df = df.where(pd.notnull(df), None)
-
         data = df.to_dict(orient="records")
 
-        for i in range(0, len(data), 200):
-            supabase.table("parts_table").insert(data[i:i+200]).execute()
+        # 🔥 FINAL HARD FIX
+        clean_data = []
+        for row in data:
+            clean_row = {}
+            for k, v in row.items():
+                if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+                    clean_row[k] = None
+                else:
+                    clean_row[k] = v
+            clean_data.append(clean_row)
 
-        st.success(f"Uploaded {len(data)} rows")
+        for i in range(0, len(clean_data), 200):
+            supabase.table("parts_table").insert(clean_data[i:i+200]).execute()
 
+        st.success(f"Uploaded {len(clean_data)} rows")
         st.cache_data.clear()
         st.rerun()
 
 # ---------------- ADMIN ----------------
 elif page == "🛠 Admin Panel" and username == "admin":
-
-    st.subheader("Admin Panel")
 
     u = st.text_input("New user")
     p = st.text_input("Password", type="password")
