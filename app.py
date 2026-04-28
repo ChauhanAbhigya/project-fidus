@@ -65,24 +65,35 @@ if st.session_state.user is None:
     .login-box {
         width: 380px;
         margin: auto;
-        margin-top: 120px;
+        margin-top: 100px;
         padding: 30px;
         background: white;
-        border-radius: 12px;
-        box-shadow: 0 8px 30px rgba(0,0,0,0.08);
+        border-radius: 14px;
+        box-shadow: 0 10px 40px rgba(0,0,0,0.08);
         text-align: center;
     }
     .login-title {
-        font-size: 24px;
+        font-size: 22px;
         font-weight: 600;
+        margin-top: 10px;
         margin-bottom: 20px;
         color: #1a237e;
+    }
+    .logo-container {
+        margin-bottom: 10px;
     }
     </style>
     """, unsafe_allow_html=True)
 
     st.markdown("<div class='login-box'>", unsafe_allow_html=True)
-    st.markdown("<div class='login-title'>🔐 Secure Login</div>", unsafe_allow_html=True)
+
+    # LOGO
+    if os.path.exists("logo.png"):
+        st.markdown("<div class='logo-container'>", unsafe_allow_html=True)
+        st.image("logo.png", width=120)
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown("<div class='login-title'>Price Lookup System</div>", unsafe_allow_html=True)
 
     u = st.text_input("Username")
     p = st.text_input("Password", type="password")
@@ -171,7 +182,6 @@ if page == "📊 Price Lookup":
             brand = str(r.get("Brand","")).lower()
             qty = pd.to_numeric(r.get("Qty"), errors="coerce")
 
-            # ✅ Validation
             if not part:
                 st.warning("Part number cannot be empty")
                 continue
@@ -207,7 +217,6 @@ if page == "📊 Price Lookup":
 
         st.session_state.table_data = pd.DataFrame(result)
 
-        # ✅ Reset input
         st.session_state.input_table = pd.DataFrame(
             columns=["Brand","Part No","Qty"]
         )
@@ -218,16 +227,13 @@ if page == "📊 Price Lookup":
 
     if not df.empty:
 
-        # ✅ Auto recalculation
         df["Qty"] = pd.to_numeric(df["Qty"], errors="coerce").fillna(0)
         df["Price"] = pd.to_numeric(df["Price"], errors="coerce").fillna(0)
         df["Amount"] = df["Qty"] * df["Price"]
 
-        # ✅ Index
         df = df.reset_index(drop=True)
         df.index = df.index + 1
 
-        # ✅ Highlight missing price
         def highlight_rows(row):
             if row["Price"] == 0:
                 return ["background-color: #ffe6e6"] * len(row)
@@ -238,7 +244,6 @@ if page == "📊 Price Lookup":
             use_container_width=True
         )
 
-        # ✅ Better total
         total = df["Amount"].sum()
         st.markdown(f"### 💰 Total Amount: € {total:.2f}")
 
@@ -248,7 +253,6 @@ if page == "📊 Price Lookup":
             st.warning("No data to save")
         else:
 
-            # ✅ Duplicate warning
             if df.duplicated(["Brand","Part No"]).any():
                 st.warning("⚠ Duplicate items found. Please review before saving.")
 
@@ -267,7 +271,6 @@ if page == "📊 Price Lookup":
             for i in range(0, len(records), 200):
                 supabase.table("offer_items").insert(records[i:i+200]).execute()
 
-            # ✅ Logs
             supabase.table("logs").insert({
                 "username": username,
                 "action": f"Saved {len(df)} items"
@@ -285,11 +288,13 @@ elif page == "📤 Upload Data" and username == "admin":
         df = pd.read_excel(uploaded, dtype=str)
 
         df.columns = df.columns.str.strip().str.lower()
+
         df = df.rename(columns={
             "part no": "part_no",
             "brand": "brand",
-            "price": "price",
-            "description": "description"
+            "price [eur]": "price",
+            "item description": "description",
+            "moq": "moq"
         })
 
         df["part_no"] = df["part_no"].astype(str).apply(norm)
