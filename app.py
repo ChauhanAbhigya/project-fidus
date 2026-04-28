@@ -4,22 +4,13 @@ import pandas as pd
 import os
 import math
 
-st.set_page_config(layout="wide")
-
-# ---------------- 🔐 SUPABASE CONFIG (NEW) ----------------
-st.sidebar.markdown("### 🔗 Supabase Config")
-
-default_url = os.getenv("https://eicwssbhjfvekaerjljm.supabase.co", "")
-default_key = os.getenv("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVpY3dzc2JoamZ2ZWthZXJqbGptIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcyNzI1NTUsImV4cCI6MjA5Mjg0ODU1NX0.okPnbQrcKN6A2-Xj_99TgB47mtx9H6KO20asriBA19g", "")
-
-SUPABASE_URL = st.sidebar.text_input("Supabase URL", value=default_url)
-SUPABASE_KEY = st.sidebar.text_input("Supabase Key", value=default_key, type="password")
-
-if not SUPABASE_URL or not SUPABASE_KEY:
-    st.warning("Please enter Supabase URL and Key in sidebar")
-    st.stop()
+# ---------------- SUPABASE ----------------
+SUPABASE_URL = os.getenv("SUPABASE_URL", "https://eicwssbhjfvekaerjljm.supabase.co")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVpY3dzc2JoamZ2ZWthZXJqbGptIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcyNzI1NTUsImV4cCI6MjA5Mjg0ODU1NX0.okPnbQrcKN6A2-Xj_99TgB47mtx9H6KO20asriBA19g")
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+st.set_page_config(layout="wide")
 
 # ---------------- UI ----------------
 st.markdown("""
@@ -180,6 +171,15 @@ if page == "📊 Price Lookup":
             brand = str(r.get("Brand","")).lower()
             qty = pd.to_numeric(r.get("Qty"), errors="coerce")
 
+            # ✅ Validation
+            if not part:
+                st.warning("Part number cannot be empty")
+                continue
+
+            if not brand:
+                st.warning("Brand cannot be empty")
+                continue
+
             if pd.isna(qty) or qty <= 0:
                 qty = 1
 
@@ -207,29 +207,51 @@ if page == "📊 Price Lookup":
 
         st.session_state.table_data = pd.DataFrame(result)
 
+        # ✅ Reset input
         st.session_state.input_table = pd.DataFrame(
             columns=["Brand","Part No","Qty"]
         )
 
         st.success("Prices fetched successfully")
 
-    df = st.session_state.table_data
+    df = st.session_state.table_data.copy()
 
     if not df.empty:
 
+        # ✅ Auto recalculation
         df["Qty"] = pd.to_numeric(df["Qty"], errors="coerce").fillna(0)
         df["Price"] = pd.to_numeric(df["Price"], errors="coerce").fillna(0)
         df["Amount"] = df["Qty"] * df["Price"]
 
-        st.dataframe(df, use_container_width=True)
+        # ✅ Index
+        df = df.reset_index(drop=True)
+        df.index = df.index + 1
 
-        st.markdown(f"### 💰 Total: € {df['Amount'].sum():.2f}")
+        # ✅ Highlight missing price
+        def highlight_rows(row):
+            if row["Price"] == 0:
+                return ["background-color: #ffe6e6"] * len(row)
+            return [""] * len(row)
+
+        st.dataframe(
+            df.style.apply(highlight_rows, axis=1),
+            use_container_width=True
+        )
+
+        # ✅ Better total
+        total = df["Amount"].sum()
+        st.markdown(f"### 💰 Total Amount: € {total:.2f}")
 
     if st.button("💾 Save Offer"):
 
         if df.empty:
             st.warning("No data to save")
         else:
+
+            # ✅ Duplicate warning
+            if df.duplicated(["Brand","Part No"]).any():
+                st.warning("⚠ Duplicate items found. Please review before saving.")
+
             records = []
 
             for _, r in df.iterrows():
@@ -244,6 +266,12 @@ if page == "📊 Price Lookup":
 
             for i in range(0, len(records), 200):
                 supabase.table("offer_items").insert(records[i:i+200]).execute()
+
+            # ✅ Logs
+            supabase.table("logs").insert({
+                "username": username,
+                "action": f"Saved {len(df)} items"
+            }).execute()
 
             st.success("Saved successfully")
 
