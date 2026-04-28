@@ -12,11 +12,42 @@ supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 st.set_page_config(layout="wide")
 
+# ---------------- UI (LIGHT GRADIENT PROFESSIONAL) ----------------
+st.markdown("""
+<style>
+body {
+    background: linear-gradient(135deg, #f5f7fa, #e4ecf7);
+}
+.stApp {
+    background: linear-gradient(135deg, #f5f7fa, #e4ecf7);
+}
+h1, h2, h3 {
+    color: #1f3b73;
+}
+[data-testid="stSidebar"] {
+    background: linear-gradient(180deg, #dfe9f3, #ffffff);
+}
+button {
+    border-radius: 8px !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
 # ---------------- CACHE ----------------
 @st.cache_data
 def load_parts():
     data = supabase.table("parts_table").select("*").execute()
     return pd.DataFrame(data.data or [])
+
+# 🔥 FIX: fresh brand fetch (no cache issue)
+def get_brands():
+    data = supabase.table("parts_table").select("brand").execute()
+    df = pd.DataFrame(data.data or [])
+    if df.empty:
+        return []
+    df["brand"] = df["brand"].astype(str).str.strip()
+    df = df[df["brand"] != ""]
+    return sorted(df["brand"].unique().tolist())
 
 # ---------------- SESSION ----------------
 if "table_data" not in st.session_state:
@@ -64,6 +95,7 @@ with st.sidebar:
     st.markdown(f"👤 Logged in: **{username}**")
 
     pages = ["📊 Price Lookup"]
+
     if username == "admin":
         pages += ["📤 Upload Data", "🛠 Admin Panel"]
 
@@ -93,17 +125,14 @@ def safe(v):
 # ================= PRICE LOOKUP =================
 if page == "📊 Price Lookup":
 
-    # 🔥 FIX: ALWAYS FETCH BRANDS DIRECTLY FROM SUPABASE (NO CACHE)
-    brand_data = supabase.table("parts_table").select("brand").execute()
-    brand_df = pd.DataFrame(brand_data.data or [])
+    col1, col2 = st.columns([8,1])
 
-    if not brand_df.empty:
-        brand_df["brand"] = brand_df["brand"].astype(str).str.strip()
-        brand_df = brand_df[brand_df["brand"] != ""]
-        brand_list = sorted(brand_df["brand"].unique().tolist())
-    else:
-        brand_list = []
+    with col2:
+        if st.button("🔄 Refresh"):
+            st.cache_data.clear()
+            st.rerun()
 
+    brand_list = get_brands()
     db_df = load_parts()
 
     input_df = st.data_editor(
@@ -172,7 +201,7 @@ if page == "📊 Price Lookup":
     st.markdown(f"### 💰 Total Amount: € {total:.2f}")
 
 # ================= UPLOAD =================
-elif page == "📤 Upload Data":
+elif page == "📤 Upload Data" and username == "admin":
 
     uploaded = st.file_uploader("Upload Excel", type=["xlsx"], accept_multiple_files=True)
 
@@ -190,7 +219,6 @@ elif page == "📤 Upload Data":
                 "item description": "description"
             })
 
-            # 🔥 CLEAN BRAND ONLY (NO OTHER CHANGE)
             df["brand"] = df["brand"].astype(str).str.strip()
             df = df[df["brand"] != ""]
 
@@ -198,18 +226,20 @@ elif page == "📤 Upload Data":
 
             data = df.to_dict(orient="records")
 
-            supabase.table("parts_table").insert(data).execute()
+            # 🔥 BATCH INSERT (FASTER + NO TIMEOUT)
+            for i in range(0, len(data), 200):
+                supabase.table("parts_table").insert(data[i:i+200]).execute()
 
             total += len(data)
 
-        st.cache_data.clear()   # 🔥 ensures fresh load_parts
+        st.cache_data.clear()
         st.success(f"Uploaded {total} rows")
         st.rerun()
 
 # ================= ADMIN =================
-elif page == "🛠 Admin Panel":
+elif page == "🛠 Admin Panel" and username == "admin":
 
-    st.subheader("Add User")
+    st.subheader("➕ Add User")
 
     u = st.text_input("Username")
     p = st.text_input("Password", type="password")
@@ -221,7 +251,7 @@ elif page == "🛠 Admin Panel":
         }).execute()
         st.success("User added")
 
-    st.subheader("Remove User")
+    st.subheader("🗑 Remove User")
 
     users = supabase.table("users").select("username").execute().data
     user_list = [x["username"] for x in users if x["username"] != "admin"]
