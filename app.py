@@ -111,7 +111,6 @@ if page == "📊 Price Lookup":
         st.warning("⚠ No data found in database. Upload data first.")
         st.stop()
 
-    # CLEAN DATABASE (IMPORTANT FIX)
     db_df["part_no"] = db_df["part_no"].astype(str).apply(norm)
     db_df["brand"] = db_df["brand"].astype(str).str.strip().str.lower()
 
@@ -171,7 +170,6 @@ if page == "📊 Price Lookup":
 
     edited_df = st.session_state.table_data.copy()
 
-    # SAFE NUMERIC CONVERSION (FIX NAN ERROR)
     edited_df["Qty"] = pd.to_numeric(edited_df["Qty"], errors="coerce").fillna(0)
     edited_df["Price"] = pd.to_numeric(edited_df["Price"], errors="coerce").fillna(0)
     edited_df["Amount"] = edited_df["Qty"] * edited_df["Price"]
@@ -180,15 +178,24 @@ if page == "📊 Price Lookup":
 
     st.markdown(f"### 💰 Total Amount: € {edited_df['Amount'].sum():.2f}")
 
+    # ========================= FIXED SAVE (ONLY CHANGE) =========================
     if st.button("💾 Save Offer"):
+
+        def clean(v):
+            if pd.isna(v):
+                return 0
+            if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+                return 0
+            return v
+
         for _, row in edited_df.iterrows():
             supabase.table("offer_items").insert({
                 "username": username,
-                "brand": row["Brand"],
-                "part_no": row["Part No"],
-                "qty": float(row["Qty"]),
-                "price": float(row["Price"]),
-                "amount": float(row["Amount"])
+                "brand": clean(row["Brand"]),
+                "part_no": clean(row["Part No"]),
+                "qty": float(clean(row["Qty"])),
+                "price": float(clean(row["Price"])),
+                "amount": float(clean(row["Amount"]))
             }).execute()
 
         st.success("Saved successfully")
@@ -231,7 +238,6 @@ elif page == "📤 Upload Data" and username == "admin":
 
                 df = df.dropna(subset=["part_no", "brand"])
 
-                # REMOVE NaN / INF (FIX IMPORTANT)
                 df = df.replace([float("inf"), -float("inf")], None)
                 df = df.where(pd.notnull(df), None)
 
@@ -248,7 +254,6 @@ elif page == "📤 Upload Data" and username == "admin":
 
         st.success(f"Uploaded {total_rows} rows")
 
-        # AUTO REFRESH AFTER UPLOAD
         st.cache_data.clear()
         st.rerun()
 
