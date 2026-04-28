@@ -213,7 +213,6 @@ if page == "📊 Price Lookup":
     df = st.session_state.table_data.copy()
 
     if not df.empty:
-
         df["Qty"] = pd.to_numeric(df["Qty"], errors="coerce").fillna(0)
         df["Price"] = pd.to_numeric(df["Price"], errors="coerce").fillna(0)
         df["Amount"] = df["Qty"] * df["Price"]
@@ -224,7 +223,6 @@ if page == "📊 Price Lookup":
     if st.button("💾 Save Offer"):
 
         records = []
-
         for _, r in df.iterrows():
             records.append({
                 "username": username,
@@ -240,7 +238,7 @@ if page == "📊 Price Lookup":
 
         st.success("Saved")
 
-# ---------------- UPLOAD ----------------
+# ---------------- UPLOAD (FIXED) ----------------
 elif page == "📤 Upload Data" and username == "admin":
 
     uploaded = st.file_uploader("Upload Excel", type=["xlsx"])
@@ -258,28 +256,44 @@ elif page == "📤 Upload Data" and username == "admin":
             "moq": "moq"
         })
 
-        df["part_no"] = df["part_no"].astype(str).apply(norm)
-        df["brand"] = df["brand"].astype(str).str.lower()
+        df["part_no"] = df["part_no"].astype(str).str.strip()
+        df["brand"] = df["brand"].astype(str).str.strip().str.lower()
         df["price"] = pd.to_numeric(df["price"], errors="coerce").fillna(0)
+        df["moq"] = pd.to_numeric(df.get("moq", 0), errors="coerce").fillna(0)
+
+        df = df.dropna(subset=["part_no", "brand"])
 
         data = df.to_dict(orient="records")
 
-        # 🔥 FINAL HARD FIX
         clean_data = []
         for row in data:
             clean_row = {}
             for k, v in row.items():
-                if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+                if isinstance(v, float) and (pd.isna(v) or v == float("inf") or v == float("-inf")):
                     clean_row[k] = None
                 else:
                     clean_row[k] = v
             clean_data.append(clean_row)
 
-        for i in range(0, len(clean_data), 200):
-            supabase.table("parts_table").insert(clean_data[i:i+200]).execute()
+        inserted_total = 0
 
-        st.success(f"Uploaded {len(clean_data)} rows")
+        for i in range(0, len(clean_data), 200):
+            batch = clean_data[i:i+200]
+            res = supabase.table("parts_table").insert(batch).execute()
+
+            if res.data:
+                inserted_total += len(res.data)
+            else:
+                st.error("❌ Insert failed")
+                st.write(res)
+                st.stop()
+
+        st.success(f"✅ Uploaded {inserted_total} rows")
+
         st.cache_data.clear()
+        st.session_state.table_data = pd.DataFrame()
+        st.session_state.input_table = pd.DataFrame(columns=["Brand","Part No","Qty"])
+
         st.rerun()
 
 # ---------------- ADMIN ----------------
