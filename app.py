@@ -1,4 +1,4 @@
-from supabase import create_client  # (kept, but not used now)
+
 import streamlit as st
 import pandas as pd
 import os
