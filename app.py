@@ -12,13 +12,13 @@ supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 st.set_page_config(layout="wide")
 
-# ---------------- PREMIUM UI (FIXED) ----------------
+# ---------------- GLOBAL GRADIENT FIX ----------------
 st.markdown("""
 <style>
 
-/* FULL PAGE GRADIENT FIX */
-[data-testid="stAppViewContainer"] {
-    background: linear-gradient(135deg, #f5f7ff, #eef2ff);
+/* 🔥 FIX FULL PAGE BACKGROUND */
+html, body, [data-testid="stAppViewContainer"] {
+    background: linear-gradient(135deg, #f6f9ff, #eef3ff) !important;
 }
 
 /* SIDEBAR */
@@ -29,31 +29,7 @@ section[data-testid="stSidebar"] * {
     color: white !important;
 }
 
-/* CARD UI */
-.block {
-    background: white;
-    padding: 18px;
-    border-radius: 12px;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.05);
-}
-
-/* BUTTON */
-.stButton>button {
-    background: linear-gradient(90deg, #667eea, #5a67d8);
-    color: white;
-    border-radius: 8px;
-    height: 40px;
-    border: none;
-}
-
-/* TITLE FIX */
-.main-title {
-    font-size: 30px;
-    font-weight: 700;
-    color: #1a237e;
-}
-
-/* LOGIN CENTER FIX */
+/* LOGIN BOX CENTER */
 .login-box {
     max-width: 400px;
     margin: auto;
@@ -65,6 +41,22 @@ section[data-testid="stSidebar"] * {
     text-align: center;
 }
 
+/* BUTTON */
+.stButton>button {
+    background: linear-gradient(90deg, #667eea, #5a67d8);
+    color: white;
+    border-radius: 8px;
+    height: 40px;
+    border: none;
+}
+
+/* TITLE */
+.main-title {
+    font-size: 30px;
+    font-weight: 700;
+    color: #1a237e;
+}
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -72,10 +64,7 @@ section[data-testid="stSidebar"] * {
 @st.cache_data
 def load_parts():
     data = supabase.table("parts_table").select("*").execute()
-    df = pd.DataFrame(data.data or [])
-    if not df.empty:
-        df["brand"] = df["brand"].astype(str).str.strip().str.lower()
-    return df
+    return pd.DataFrame(data.data or [])
 
 # ---------------- LOGIN ----------------
 if "user" not in st.session_state:
@@ -89,12 +78,12 @@ def login(u, p):
         .execute()
     return res.data[0] if res.data else None
 
-# ---------------- LOGIN UI ----------------
+# ---------------- LOGIN PAGE ----------------
 if st.session_state.user is None:
 
     st.markdown("<div class='login-box'>", unsafe_allow_html=True)
 
-    # CENTER LOGO
+    # ✅ CENTER LOGO
     if os.path.exists("logo.png"):
         st.image("logo.png", width=150)
 
@@ -152,14 +141,22 @@ def safe(v):
 # ========================= PRICE PAGE =========================
 if page == "📊 Price Lookup":
 
-    if st.button("🔄 Refresh Data"):
-        st.cache_data.clear()
+    # 🔥 REFRESH BUTTON
+    if st.button("🔄 Refresh Brands"):
         st.rerun()
 
-    db_df = load_parts()
+    # 🔥 ALWAYS FETCH FRESH BRANDS (NO CACHE)
+    brand_data = supabase.table("parts_table").select("brand").execute()
+    brand_df = pd.DataFrame(brand_data.data or [])
 
-    # ✅ BRAND FIX (REAL FIX)
-    brand_list = sorted(db_df["brand"].dropna().unique().tolist())
+    if not brand_df.empty:
+        brand_df["brand"] = brand_df["brand"].astype(str).str.strip().str.lower()
+        brand_list = sorted(brand_df["brand"].dropna().unique().tolist())
+    else:
+        brand_list = []
+
+    # LOAD PARTS FOR MATCHING
+    db_df = load_parts()
 
     input_df = st.data_editor(
         pd.DataFrame(columns=["Brand","Part No","Qty"]),
@@ -188,7 +185,7 @@ if page == "📊 Price Lookup":
 
             match = db_df[
                 (db_df["part_no"].astype(str).apply(norm) == part) &
-                (db_df["brand"] == brand)
+                (db_df["brand"].astype(str).str.lower() == brand)
             ]
 
             if not match.empty:
@@ -212,9 +209,7 @@ if page == "📊 Price Lookup":
 
     if "table_data" in st.session_state:
         df = st.session_state.table_data
-
         st.dataframe(df, use_container_width=True)
-
         st.markdown(f"### 💰 Total: € {df['Amount'].sum():.2f}")
 
 # ========================= UPLOAD =========================
@@ -228,7 +223,6 @@ elif page == "📤 Upload Data":
         for f in uploaded:
 
             df = pd.read_excel(f)
-
             df.columns = df.columns.str.strip().str.lower()
 
             df = df.rename(columns={
@@ -237,9 +231,9 @@ elif page == "📤 Upload Data":
                 "item description": "description"
             })
 
-            df["brand"] = df["brand"].astype(str).str.lower()
+            # 🔥 CLEAN BRAND
+            df["brand"] = df["brand"].astype(str).str.strip().str.lower()
 
-            # ✅ FINAL FIX FOR NAN ERROR
             df = df.fillna(0)
 
             data = df.to_dict(orient="records")
@@ -248,7 +242,9 @@ elif page == "📤 Upload Data":
 
             total += len(data)
 
+        st.cache_data.clear()   # 🔥 IMPORTANT
         st.success(f"Uploaded {total} rows")
+        st.rerun()
 
 # ========================= ADMIN =========================
 elif page == "🛠 Admin Panel":
