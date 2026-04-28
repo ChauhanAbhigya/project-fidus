@@ -5,31 +5,23 @@ import os
 import math
 
 # ---------------- SUPABASE ----------------
-SUPABASE_URL = "https://eicwssbhjfvekaerjljm.supabase.co"
-SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVpY3dzc2JoamZ2ZWthZXJqbGptIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcyNzI1NTUsImV4cCI6MjA5Mjg0ODU1NX0.okPnbQrcKN6A2-Xj_99TgB47mtx9H6KO20asriBA19g"
+SUPABASE_URL = st.secrets["SUPABASE_URL"]
+SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 st.set_page_config(layout="wide")
 
-# ---------------- PREMIUM LIGHT UI ----------------
+# ---------------- UI ----------------
 st.markdown("""
 <style>
 body {
     background: linear-gradient(135deg, #f7faff, #eef3ff);
 }
-
 .main-title {
     font-size: 32px;
     font-weight: 700;
     color: #1a237e;
-}
-
-.block {
-    background: white;
-    padding: 15px;
-    border-radius: 12px;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.05);
 }
 </style>
 """, unsafe_allow_html=True)
@@ -54,10 +46,10 @@ if "input_table" not in st.session_state:
         columns=["Brand","Part No","Qty"]
     )
 
-# ---------------- LOGIN ----------------
 if "user" not in st.session_state:
     st.session_state.user = None
 
+# ---------------- LOGIN FUNCTION ----------------
 def login(u, p):
     res = supabase.table("users")\
         .select("*")\
@@ -66,19 +58,45 @@ def login(u, p):
         .execute()
     return res.data[0] if res.data else None
 
+# ---------------- PROFESSIONAL LOGIN UI ----------------
 if st.session_state.user is None:
-    st.markdown("<div class='main-title'>🔐 Login</div>", unsafe_allow_html=True)
 
-    u = st.text_input("Username")
-    p = st.text_input("Password", type="password")
+    st.markdown("""
+    <style>
+    .login-box {
+        width: 380px;
+        margin: auto;
+        margin-top: 120px;
+        padding: 30px;
+        background: white;
+        border-radius: 12px;
+        box-shadow: 0 8px 30px rgba(0,0,0,0.08);
+        text-align: center;
+    }
+    .login-title {
+        font-size: 24px;
+        font-weight: 600;
+        margin-bottom: 20px;
+        color: #1a237e;
+    }
+    </style>
+    """, unsafe_allow_html=True)
 
-    if st.button("Login"):
+    st.markdown("<div class='login-box'>", unsafe_allow_html=True)
+    st.markdown("<div class='login-title'>🔐 Secure Login</div>", unsafe_allow_html=True)
+
+    u = st.text_input("Username", key="login_user")
+    p = st.text_input("Password", type="password", key="login_pass")
+
+    if st.button("Login", use_container_width=True):
         user = login(u, p)
         if user:
             st.session_state.user = user
             st.rerun()
         else:
-            st.error("Invalid credentials")
+            st.error("Invalid username or password")
+
+    st.markdown("</div>", unsafe_allow_html=True)
 
     st.stop()
 
@@ -119,46 +137,6 @@ def safe(v, is_int=False):
     except:
         return v
 
-# ---------------- CLEAN EXCEL (UNIVERSAL FIX) ----------------
-def clean_excel(df):
-
-    df.columns = df.columns.str.strip().str.lower()
-
-    mapping = {
-        "part no": "part_no",
-        "part number": "part_no",
-        "brand": "brand",
-        "price [eur]": "price",
-        "price": "price",
-        "item description": "description",
-        "description": "description",
-        "moq": "moq"
-    }
-
-    df = df.rename(columns=mapping)
-
-    for col in ["part_no","brand","price"]:
-        if col not in df.columns:
-            df[col] = None
-
-    if "description" not in df.columns:
-        df["description"] = None
-    if "moq" not in df.columns:
-        df["moq"] = 0
-
-    df["part_no"] = df["part_no"].astype(str).apply(norm)
-    df["brand"] = df["brand"].astype(str).str.lower()
-
-    df["price"] = pd.to_numeric(df["price"], errors="coerce").fillna(0)
-    df["moq"] = pd.to_numeric(df["moq"], errors="coerce").fillna(0)
-
-    df = df.dropna(subset=["part_no","brand"])
-
-    df = df.replace([float("inf"), -float("inf")], None)
-    df = df.where(pd.notnull(df), None)
-
-    return df
-
 # ---------------- PRICE PAGE ----------------
 if page == "📊 Price Lookup":
 
@@ -171,10 +149,21 @@ if page == "📊 Price Lookup":
     db_df["part_no"] = db_df["part_no"].astype(str).apply(norm)
     db_df["brand"] = db_df["brand"].astype(str).str.lower()
 
+    # ✅ BRAND LIST (OLD FEATURE RESTORED)
+    brand_list = sorted(db_df["brand"].dropna().unique())
+
+    # ✅ TABLE INPUT (OLD UI RESTORED)
     input_df = st.data_editor(
         st.session_state.input_table,
         num_rows="dynamic",
-        use_container_width=True
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Brand": st.column_config.SelectboxColumn("Brand", options=brand_list),
+            "Part No": st.column_config.TextColumn("Part No"),
+            "Qty": st.column_config.NumberColumn("Qty", min_value=1, step=1)
+        },
+        key="input_editor"
     )
 
     if st.button("🔎 Fetch Prices"):
@@ -214,6 +203,13 @@ if page == "📊 Price Lookup":
 
         st.session_state.table_data = pd.DataFrame(result)
 
+        # ✅ RESET INPUT TABLE (OLD FEATURE)
+        st.session_state.input_table = pd.DataFrame(
+            columns=["Brand","Part No","Qty"]
+        )
+
+        st.success("Prices fetched successfully")
+
     df = st.session_state.table_data
 
     if not df.empty:
@@ -228,45 +224,53 @@ if page == "📊 Price Lookup":
 
     if st.button("💾 Save Offer"):
 
-        records = []
+        if df.empty:
+            st.warning("No data to save")
+        else:
+            records = []
 
-        for _, r in df.iterrows():
-            records.append({
-                "username": username,
-                "brand": r["Brand"],
-                "part_no": r["Part No"],
-                "qty": safe(r["Qty"], True),
-                "price": safe(r["Price"]),
-                "amount": safe(r["Amount"])
-            })
+            for _, r in df.iterrows():
+                records.append({
+                    "username": username,
+                    "brand": r["Brand"],
+                    "part_no": r["Part No"],
+                    "qty": safe(r["Qty"], True),
+                    "price": safe(r["Price"]),
+                    "amount": safe(r["Amount"])
+                })
 
-        for i in range(0, len(records), 200):
-            supabase.table("offer_items").insert(records[i:i+200]).execute()
+            for i in range(0, len(records), 200):
+                supabase.table("offer_items").insert(records[i:i+200]).execute()
 
-        st.success("Saved")
+            st.success("Saved successfully")
 
-# ---------------- UPLOAD PAGE ----------------
+# ---------------- UPLOAD ----------------
 elif page == "📤 Upload Data" and username == "admin":
 
-    uploaded = st.file_uploader("Upload Excel", type=["xlsx"], accept_multiple_files=True)
+    uploaded = st.file_uploader("Upload Excel", type=["xlsx"])
 
     if uploaded:
 
-        total = 0
+        df = pd.read_excel(uploaded, dtype=str)
 
-        for f in uploaded:
+        df.columns = df.columns.str.strip().str.lower()
+        df = df.rename(columns={
+            "part no": "part_no",
+            "brand": "brand",
+            "price": "price",
+            "description": "description"
+        })
 
-            df = pd.read_excel(f, dtype=str)
-            df = clean_excel(df)
+        df["part_no"] = df["part_no"].astype(str).apply(norm)
+        df["brand"] = df["brand"].astype(str).str.lower()
+        df["price"] = pd.to_numeric(df["price"], errors="coerce").fillna(0)
 
-            data = df.to_dict(orient="records")
+        data = df.to_dict(orient="records")
 
-            for i in range(0, len(data), 200):
-                supabase.table("parts_table").insert(data[i:i+200]).execute()
+        for i in range(0, len(data), 200):
+            supabase.table("parts_table").insert(data[i:i+200]).execute()
 
-            total += len(data)
-
-        st.success(f"Uploaded {total} rows")
+        st.success(f"Uploaded {len(data)} rows")
 
         st.cache_data.clear()
         st.rerun()
@@ -274,16 +278,17 @@ elif page == "📤 Upload Data" and username == "admin":
 # ---------------- ADMIN ----------------
 elif page == "🛠 Admin Panel" and username == "admin":
 
-    u = st.text_input("New user")
-    p = st.text_input("Pass", type="password")
+    st.subheader("Admin Panel")
 
-    if st.button("Add"):
+    u = st.text_input("New user")
+    p = st.text_input("Password", type="password")
+
+    if st.button("Add User"):
         supabase.table("users").insert({
             "username": u,
             "password": p
         }).execute()
-
-        st.success("Added")
+        st.success("User added")
 
     users = supabase.table("users").select("username").execute().data
     st.write([x["username"] for x in users])
