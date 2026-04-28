@@ -1,14 +1,17 @@
+from supabase import create_client  # (kept, but not used now)
 import streamlit as st
 import pandas as pd
-import psycopg2
 import os
 import math
+import psycopg2
+from psycopg2.extras import execute_values
 
-# ---------------- POSTGRES ----------------
+# ---------------- POSTGRES CONNECTION ----------------
 DATABASE_URL = "postgresql://parts_db_bi6b_user:vVxgefrTwrWGoHwzIPXbfemlrb4Fn6GW@dpg-d7o8oqgg4nts73aagbcg-a.oregon-postgres.render.com/parts_db_bi6b"
 
 conn = psycopg2.connect(DATABASE_URL)
 cur = conn.cursor()
+
 # ---------------- AUTO CREATE TABLES ----------------
 cur.execute("""
 CREATE TABLE IF NOT EXISTS parts_table (
@@ -29,7 +32,6 @@ CREATE TABLE IF NOT EXISTS users (
 );
 """)
 
-# create admin if not exists
 cur.execute("""
 INSERT INTO users (username, password)
 SELECT 'admin', 'admin'
@@ -39,7 +41,6 @@ WHERE NOT EXISTS (
 """)
 
 conn.commit()
-
 
 st.set_page_config(layout="wide")
 
@@ -66,12 +67,8 @@ if "user" not in st.session_state:
     st.session_state.user = None
 
 def login(u, p):
-    query = "SELECT * FROM users WHERE username=%s AND password=%s LIMIT 1"
-    cur.execute(query, (u.strip(), p.strip()))
-    res = cur.fetchone()
-    if res:
-        return {"username": res[1]}
-    return None
+    cur.execute("SELECT * FROM users WHERE username=%s AND password=%s", (u, p))
+    return cur.fetchone()
 
 if st.session_state.user is None:
     st.title("🔐 Login")
@@ -79,17 +76,16 @@ if st.session_state.user is None:
     p = st.text_input("Password", type="password")
 
     if st.button("Login"):
-        user = login(u, p)
+        user = login(u.strip(), p.strip())
         if user:
-            st.session_state.user = user
+            st.session_state.user = {"username": u}
             st.rerun()
         else:
             st.error("Invalid credentials")
 
     st.stop()
 
-user = st.session_state.user
-username = user["username"]
+username = st.session_state.user["username"]
 
 # ---------------- SIDEBAR ----------------
 with st.sidebar:
@@ -142,6 +138,7 @@ if page == "📊 Price Lookup":
 
     brand_list = sorted(db_df["brand"].unique().tolist())
 
+    # 🔄 Refresh Button
     col1, col2 = st.columns([10,1])
     with col2:
         if st.button("🔄"):
@@ -153,7 +150,10 @@ if page == "📊 Price Lookup":
         num_rows="dynamic",
         use_container_width=True,
         column_config={
-            "Brand": st.column_config.SelectboxColumn("Brand", options=brand_list)
+            "Brand": st.column_config.SelectboxColumn(
+                "Brand",
+                options=brand_list
+            )
         },
         key="input_editor"
     )
@@ -171,18 +171,15 @@ if page == "📊 Price Lookup":
             if pd.isna(qty) or qty <= 0:
                 qty = 1
 
-            cur.execute("""
-                SELECT price, description
-                FROM parts_table
-                WHERE LOWER(brand) = %s AND LOWER(part_no) = %s
-                LIMIT 1
-            """, (brand.lower(), part))
+            match = db_df[
+                (db_df["part_no"].astype(str).apply(norm) == part) &
+                (db_df["brand"].str.lower() == brand.lower())
+            ]
 
-            row = cur.fetchone()
-
-            if row:
-                price = safe_float(row[0])
-                desc = row[1] if row[1] else "N/A"
+            if not match.empty:
+                row = match.iloc[0]
+                price = safe_float(row.get("price"))
+                desc = row.get("description","N/A")
             else:
                 price = 0
                 desc = "Not Found"
@@ -205,6 +202,7 @@ if page == "📊 Price Lookup":
     df["Amount"] = df["Qty"] * df["Price"]
 
     st.dataframe(df, use_container_width=True)
+
     st.markdown(f"### 💰 Total: € {df['Amount'].sum():.2f}")
 
 # ================= UPLOAD =================
@@ -244,22 +242,24 @@ elif page == "📤 Upload Data":
 
             records = df.to_dict(orient="records")
 
-            for i in range(0, len(records), 200):
-                chunk = records[i:i+200]
+            values = [
+                (
+                    r.get("part_no"),
+                    r.get("brand"),
+                    safe_float(r.get("price")),
+                    r.get("description"),
+                    safe_int(r.get("moq"))
+                )
+                for r in records
+            ]
 
-                for r in chunk:
-                    cur.execute("""
-                        INSERT INTO parts_table (part_no, brand, price, description, moq)
-                        VALUES (%s, %s, %s, %s, %s)
-                    """, (
-                        r.get("part_no"),
-                        r.get("brand"),
-                        safe_float(r.get("price")),
-                        r.get("description"),
-                        safe_int(r.get("moq"))
-                    ))
+            query = """
+            INSERT INTO parts_table (part_no, brand, price, description, moq)
+            VALUES %s
+            """
 
-                conn.commit()
+            execute_values(cur, query, values)
+            conn.commit()
 
             total += len(records)
 
@@ -276,19 +276,17 @@ elif page == "🛠 Admin Panel":
     p = st.text_input("Password", type="password")
 
     if st.button("Add User"):
-        cur.execute("INSERT INTO users (username, password) VALUES (%s, %s)", (u, p))
+        cur.execute("INSERT INTO users (username, password) VALUES (%s,%s)", (u,p))
         conn.commit()
         st.success("User added")
 
     st.subheader("Remove User")
 
-    cur.execute("SELECT username FROM users")
-    users = cur.fetchall()
+    cur.execute("SELECT username FROM users WHERE username!='admin'")
+    users = [x[0] for x in cur.fetchall()]
 
-    user_list = [x[0] for x in users if x[0] != "admin"]
-
-    if user_list:
-        del_user = st.selectbox("Select user", user_list)
+    if users:
+        del_user = st.selectbox("Select user", users)
 
         if st.button("Delete User"):
             cur.execute("DELETE FROM users WHERE username=%s", (del_user,))
