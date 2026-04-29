@@ -304,26 +304,67 @@ elif page == "📤 Data Upload":
         st.rerun()
 
 # ================= ADMIN =================
+# ================= ADMIN =================
 elif page == "🛠 Access Control":
-    set_bg("#f3f6ff","#e8edff")
+    set_bg("#f3f6ff", "#e8edff")
     st.title("User & Access Control")
 
-    u = st.text_input("Username")
-    p = st.text_input("Password", type="password")
+    # ---------------- CREATE USER ----------------
+    st.subheader("➕ Create User Account")
+
+    u = st.text_input("New Username")
+    p = st.text_input("New Password", type="password")
 
     if st.button("Create User"):
-        cur.execute("INSERT INTO users (username,password) VALUES (%s,%s)",(u,p))
-        conn.commit()
-        st.success("User Created")
+        if u and p:
+            try:
+                cur.execute(
+                    "INSERT INTO users (username,password) VALUES (%s,%s)",
+                    (u, p)
+                )
+                conn.commit()
+                st.success("User Created Successfully")
+            except Exception as e:
+                st.error("User already exists or error occurred")
+        else:
+            st.warning("Please enter username and password")
+
+    st.markdown("---")
+
+    # ---------------- REMOVE USER ----------------
+    st.subheader("🗑 Remove User")
+
+    cur.execute("SELECT username FROM users WHERE username != 'admin'")
+    users = [x[0] for x in cur.fetchall()]
+
+    del_user = st.selectbox("Select User", ["-- Select --"] + users)
+
+    if st.button("Delete User"):
+        if del_user != "-- Select --":
+            cur.execute("DELETE FROM users WHERE username=%s", (del_user,))
+            conn.commit()
+            st.success(f"User '{del_user}' deleted successfully")
+        else:
+            st.warning("Select a user first")
+
+    st.markdown("---")
+
+    # ---------------- CHANGE ADMIN PASSWORD ----------------
+    st.subheader("🔐 Change Admin Password")
 
     current = st.text_input("Current Password", type="password")
     new_pass = st.text_input("New Password", type="password")
 
     if st.button("Update Password"):
         cur.execute("SELECT password FROM users WHERE username='admin'")
-        if current == cur.fetchone()[0]:
-            cur.execute("UPDATE users SET password=%s WHERE username='admin'", (new_pass,))
+        real = cur.fetchone()
+
+        if real and current == real[0]:
+            cur.execute(
+                "UPDATE users SET password=%s WHERE username='admin'",
+                (new_pass,)
+            )
             conn.commit()
-            st.success("Updated")
+            st.success("Admin password updated successfully")
         else:
-            st.error("Wrong password")
+            st.error("Incorrect current password")
