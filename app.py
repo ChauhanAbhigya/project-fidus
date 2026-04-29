@@ -302,45 +302,44 @@ elif page == "📤 Data Upload":
         for f in files:
             df = pd.read_excel(f)
 
-            # 🔥 CLEAN COLUMN NAMES
+            # 🔥 Normalize columns
             df.columns = df.columns.str.strip().str.lower()
 
-            # 🔥 RENAME FLEXIBLE MATCHES
-            rename_map = {}
+            # 🔥 Exact rename based on your format
+            df.rename(columns={
+                "part no": "part_no",
+                "price [eur]": "price",
+                "item description": "description",
+                "moq": "moq"
+            }, inplace=True)
 
-            for col in df.columns:
-                if "part" in col:
-                    rename_map[col] = "part_no"
-                elif "brand" in col or "make" in col:
-                    rename_map[col] = "brand"
-                elif "price" in col or "rate" in col:
-                    rename_map[col] = "price"
-                elif "desc" in col:
-                    rename_map[col] = "description"
-
-            df.rename(columns=rename_map, inplace=True)
-
-            # 🔥 CHECK REQUIRED COLUMNS
+            # 🔥 Validate
             required = ["part_no", "brand", "price"]
-
             missing = [c for c in required if c not in df.columns]
+
             if missing:
                 st.error(f"Missing columns: {missing}")
                 st.stop()
 
-            # 🔥 CLEAN DATA
+            # 🔥 Clean data
             df["part_no"] = df["part_no"].astype(str)
             df["brand"] = df["brand"].astype(str)
             df["price"] = pd.to_numeric(df["price"], errors="coerce").fillna(0)
 
-            # 🔥 INSERT
+            if "description" not in df.columns:
+                df["description"] = ""
+
+            if "moq" not in df.columns:
+                df["moq"] = 0
+
+            # 🔥 Insert
             values = [
                 (
                     r["part_no"],
                     r["brand"],
-                    safe_float(r["price"]),
-                    r.get("description", ""),
-                    0
+                    float(r["price"]),
+                    r["description"],
+                    int(r["moq"]) if pd.notna(r["moq"]) else 0
                 )
                 for _, r in df.iterrows()
             ]
