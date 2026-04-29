@@ -73,16 +73,17 @@ WHERE NOT EXISTS (SELECT 1 FROM users WHERE username='admin')
 
 conn.commit()
 
-# ---------------- CACHE ----------------
+# ---------------- CACHE (FAST BRAND LOAD) ----------------
 @st.cache_data
-def load_parts():
-    df = pd.read_sql("SELECT * FROM parts_table", conn)
-    df.columns = df.columns.str.lower()
-    return df
+def load_brands():
+    cur.execute("SELECT DISTINCT brand FROM parts_table ORDER BY brand")
+    return [x[0] for x in cur.fetchall()]
 
 # ---------------- SESSION ----------------
 if "table_data" not in st.session_state:
-    st.session_state.table_data = pd.DataFrame(columns=["Brand","Part No","Description","Qty","Price","Amount"])
+    st.session_state.table_data = pd.DataFrame(columns=[
+        "Brand","Part No","Description","Qty","Price","Amount"
+    ])
 
 if "input_table" not in st.session_state:
     st.session_state.input_table = pd.DataFrame(columns=["Brand","Part No","Qty"])
@@ -137,15 +138,6 @@ with st.sidebar:
         st.session_state.clear()
         st.rerun()
 
-# ---------------- HELPERS ----------------
-def norm(x):
-    if pd.isna(x): return ""
-    return re.sub(r'[^a-z0-9]', '', str(x).lower()).lstrip('0')
-
-def safe_float(v):
-    try: return float(v)
-    except: return 0
-
 # ================= PRICE LOOKUP =================
 if page == "📊 Price Lookup":
     set_bg("#f0f7ff","#e6f0ff")
@@ -158,13 +150,8 @@ if page == "📊 Price Lookup":
             st.cache_data.clear()
             st.rerun()
 
-    db_df = load_parts()
-
-    db_df["brand"] = db_df["brand"].astype(str).str.strip()
-    brand_list = sorted(db_df["brand"].unique())
-
-    db_df["part_norm"] = db_df["part_no"].apply(norm)
-    db_df["brand_norm"] = db_df["brand"].apply(norm)
+    # ✅ FAST brand load
+    brand_list = load_brands()
 
     input_df = st.data_editor(
         st.session_state.input_table,
@@ -176,24 +163,42 @@ if page == "📊 Price Lookup":
     )
 
     if st.button("Get Pricing"):
-        result = []
-        for _, r in input_df.iterrows():
-            match = db_df[
-                (db_df["part_norm"] == norm(r["Part No"])) &
-                (db_df["brand_norm"] == norm(r["Brand"]))
-            ]
 
-            price = match.iloc[0]["price"] if not match.empty else 0
-            desc = match.iloc[0]["description"] if not match.empty else "Not Found"
-            qty = int(r["Qty"]) if pd.notna(r["Qty"]) else 1
+        result = []
+
+        for _, r in input_df.iterrows():
+
+            part = str(r.get("Part No","")).strip()
+            brand = str(r.get("Brand","")).strip()
+
+            qty = pd.to_numeric(r.get("Qty"), errors="coerce")
+            if pd.isna(qty) or qty <= 0:
+                qty = 1
+
+            price = 0
+            desc = "Not Found"
+
+            if part and brand:
+                cur.execute("""
+                    SELECT price, description
+                    FROM parts_table
+                    WHERE LOWER(part_no)=LOWER(%s)
+                    AND LOWER(brand)=LOWER(%s)
+                    LIMIT 1
+                """, (part, brand))
+
+                match = cur.fetchone()
+
+                if match:
+                    price, desc = match
 
             result.append({
-                "Brand": r["Brand"],
-                "Part No": r["Part No"],
+                "Brand": brand,
+                "Part No": part,
                 "Description": desc,
                 "Qty": qty,
-                "Price": price,
-                "Amount": qty * price
+                "Price": float(price),
+                "Amount": qty * float(price)
             })
 
         st.session_state.table_data = pd.DataFrame(result)
@@ -287,7 +292,8 @@ elif page == "📤 Data Upload":
                 for _, r in df.iterrows()
             ]
 
-            execute_values(cur,
+            execute_values(
+                cur,
                 "INSERT INTO parts_table (part_no,brand,price,description,moq) VALUES %s",
                 values
             )
