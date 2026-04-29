@@ -3,7 +3,7 @@ import pandas as pd
 import psycopg2
 from psycopg2.extras import execute_values
 import math
-import re   # 🔥 added
+import re
 
 # ---------------- DB ----------------
 DATABASE_URL = "postgresql://parts_db_bi6b_user:vVxgefrTwrWGoHwzIPXbfemlrb4Fn6GW@dpg-d7o8oqgg4nts73aagbcg-a.oregon-postgres.render.com/parts_db_bi6b"
@@ -11,69 +11,80 @@ DATABASE_URL = "postgresql://parts_db_bi6b_user:vVxgefrTwrWGoHwzIPXbfemlrb4Fn6GW
 conn = psycopg2.connect(DATABASE_URL)
 cur = conn.cursor()
 
-# ---------------- UI CONFIG ----------------
+# ---------------- PAGE CONFIG ----------------
 st.set_page_config(
     layout="wide",
-    page_title="FIDUS Parts System",
+    page_title="Parts System",
     page_icon="⚙️"
 )
 
-# ---------------- PREMIUM UI (GLOBAL THEME) ----------------
+# ---------------- LIGHT MINIMAL UI ----------------
 st.markdown("""
 <style>
 
-/* Background gradient */
+/* Light background */
 .stApp {
-    background: linear-gradient(135deg, #0f2027, #203a43, #2c5364);
-    color: white;
-    font-family: 'Segoe UI', sans-serif;
+    background: linear-gradient(180deg, #f7f9fc, #eef3f8);
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    color: #1f2937;
 }
 
-/* Main container glass effect */
+/* Main container */
 .block-container {
-    padding: 2rem 2rem;
-    background: rgba(255,255,255,0.05);
-    border-radius: 20px;
-    backdrop-filter: blur(10px);
+    padding: 2rem;
 }
 
-/* Buttons */
+/* Cards feel */
+div[data-testid="stVerticalBlock"] {
+    background: white;
+    padding: 18px;
+    border-radius: 14px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+}
+
+/* Buttons - minimal */
 div.stButton > button {
-    background: linear-gradient(90deg, #00c6ff, #0072ff);
-    color: white;
-    border-radius: 10px;
-    height: 42px;
-    border: none;
-    font-weight: 600;
-    box-shadow: 0px 4px 15px rgba(0,0,0,0.3);
+    background: #ffffff;
+    color: #2563eb;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    padding: 0.4rem 1rem;
+    font-weight: 500;
+    transition: 0.2s;
 }
 
 div.stButton > button:hover {
-    transform: scale(1.02);
-}
-
-/* Dataframe */
-.stDataFrame {
-    background: rgba(255,255,255,0.08);
-    border-radius: 12px;
-}
-
-/* Sidebar */
-section[data-testid="stSidebar"] {
-    background: linear-gradient(180deg, #141e30, #243b55);
+    border-color: #2563eb;
+    color: #1d4ed8;
 }
 
 /* Inputs */
 input, textarea {
-    background-color: rgba(255,255,255,0.1) !important;
-    color: white !important;
     border-radius: 8px !important;
+    border: 1px solid #d1d5db !important;
+}
+
+/* Sidebar */
+section[data-testid="stSidebar"] {
+    background: #ffffff;
+    border-right: 1px solid #e5e7eb;
+}
+
+/* Titles */
+h1, h2, h3 {
+    color: #111827;
+    font-weight: 600;
+}
+
+/* Dataframe */
+.stDataFrame {
+    border-radius: 10px;
 }
 
 </style>
 """, unsafe_allow_html=True)
 
-# ---------------- CREATE TABLE ----------------
+# ---------------- TABLES ----------------
 cur.execute("""
 CREATE TABLE IF NOT EXISTS parts_table (
     id SERIAL PRIMARY KEY,
@@ -129,12 +140,12 @@ def login(u,p):
 
 if st.session_state.user is None:
 
-    st.markdown("<h1 style='text-align:center;color:#00c6ff;'>FIDUS Parts Portal</h1>", unsafe_allow_html=True)
-
     col1, col2, col3 = st.columns([1,2,1])
 
     with col2:
-        st.image("logo.png", width=220)   # 🔥 LOGO LOGIN CENTER
+        st.image("logo.png", width=180)
+
+        st.markdown("### Login to continue")
 
         u = st.text_input("Username")
         p = st.text_input("Password", type="password")
@@ -153,15 +164,14 @@ username = st.session_state.user["username"]
 # ---------------- SIDEBAR ----------------
 with st.sidebar:
 
-    st.image("logo.png", width=160)   # 🔥 LOGO SIDEBAR
-
-    st.markdown(f"### 👤 {username}")
+    st.image("logo.png", width=140)
+    st.markdown(f"### {username}")
 
     pages = ["📊 Price Lookup"]
     if username == "admin":
         pages += ["📤 Upload Data", "🛠 Admin Panel"]
 
-    page = st.radio("Navigation", pages)
+    page = st.radio("Menu", pages)
 
     if st.button("Logout"):
         st.session_state.clear()
@@ -192,7 +202,7 @@ def safe_int(v):
 # ================= PRICE LOOKUP =================
 if page == "📊 Price Lookup":
 
-    st.title("📊 Price Lookup")
+    st.title("Price Lookup")
 
     db_df = load_parts()
 
@@ -208,7 +218,7 @@ if page == "📊 Price Lookup":
 
     col1, col2 = st.columns([10,1])
     with col2:
-        if st.button("🔄 Refresh"):
+        if st.button("Refresh"):
             st.cache_data.clear()
             st.rerun()
 
@@ -221,7 +231,7 @@ if page == "📊 Price Lookup":
         }
     )
 
-    if st.button("🔎 Fetch Prices"):
+    if st.button("Fetch Prices"):
 
         result = []
 
@@ -267,7 +277,7 @@ if page == "📊 Price Lookup":
 # ================= UPLOAD =================
 elif page == "📤 Upload Data":
 
-    st.title("📤 Upload Data")
+    st.title("Upload Data")
 
     files = st.file_uploader("Upload Excel", type=["xlsx"], accept_multiple_files=True)
 
@@ -322,7 +332,7 @@ elif page == "🛠 Admin Panel":
         st.error("Access Denied")
         st.stop()
 
-    st.title("🛠 Admin Panel")
+    st.title("Admin Panel")
 
     st.subheader("Add User")
     u = st.text_input("Username")
