@@ -11,21 +11,65 @@ DATABASE_URL = "postgresql://parts_db_bi6b_user:vVxgefrTwrWGoHwzIPXbfemlrb4Fn6GW
 conn = psycopg2.connect(DATABASE_URL)
 cur = conn.cursor()
 
-# ---------------- UI ----------------
-st.set_page_config(layout="wide")
+# ---------------- UI CONFIG ----------------
+st.set_page_config(
+    layout="wide",
+    page_title="FIDUS Parts System",
+    page_icon="⚙️"
+)
 
+# ---------------- PREMIUM UI (GLOBAL THEME) ----------------
 st.markdown("""
 <style>
+
+/* Background gradient */
 .stApp {
-    background: linear-gradient(135deg, #f5f7fa, #e4ecf7);
+    background: linear-gradient(135deg, #0f2027, #203a43, #2c5364);
+    color: white;
     font-family: 'Segoe UI', sans-serif;
 }
-div.stButton > button {
-    background: linear-gradient(90deg, #4facfe, #00f2fe);
-    color: white;
-    border-radius: 8px;
-    height: 40px;
+
+/* Main container glass effect */
+.block-container {
+    padding: 2rem 2rem;
+    background: rgba(255,255,255,0.05);
+    border-radius: 20px;
+    backdrop-filter: blur(10px);
 }
+
+/* Buttons */
+div.stButton > button {
+    background: linear-gradient(90deg, #00c6ff, #0072ff);
+    color: white;
+    border-radius: 10px;
+    height: 42px;
+    border: none;
+    font-weight: 600;
+    box-shadow: 0px 4px 15px rgba(0,0,0,0.3);
+}
+
+div.stButton > button:hover {
+    transform: scale(1.02);
+}
+
+/* Dataframe */
+.stDataFrame {
+    background: rgba(255,255,255,0.08);
+    border-radius: 12px;
+}
+
+/* Sidebar */
+section[data-testid="stSidebar"] {
+    background: linear-gradient(180deg, #141e30, #243b55);
+}
+
+/* Inputs */
+input, textarea {
+    background-color: rgba(255,255,255,0.1) !important;
+    color: white !important;
+    border-radius: 8px !important;
+}
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -84,42 +128,52 @@ def login(u,p):
     return cur.fetchone()
 
 if st.session_state.user is None:
-    st.title("🔐 Login")
-    u = st.text_input("Username")
-    p = st.text_input("Password", type="password")
 
-    if st.button("Login"):
-        if login(u,p):
-            st.session_state.user = {"username":u}
-            st.rerun()
-        else:
-            st.error("Invalid credentials")
+    st.markdown("<h1 style='text-align:center;color:#00c6ff;'>FIDUS Parts Portal</h1>", unsafe_allow_html=True)
+
+    col1, col2, col3 = st.columns([1,2,1])
+
+    with col2:
+        st.image("logo.png", width=220)   # 🔥 LOGO LOGIN CENTER
+
+        u = st.text_input("Username")
+        p = st.text_input("Password", type="password")
+
+        if st.button("Login"):
+            if login(u,p):
+                st.session_state.user = {"username":u}
+                st.rerun()
+            else:
+                st.error("Invalid credentials")
+
     st.stop()
 
 username = st.session_state.user["username"]
 
 # ---------------- SIDEBAR ----------------
 with st.sidebar:
-    st.markdown(f"👤 **{username}**")
+
+    st.image("logo.png", width=160)   # 🔥 LOGO SIDEBAR
+
+    st.markdown(f"### 👤 {username}")
 
     pages = ["📊 Price Lookup"]
     if username == "admin":
         pages += ["📤 Upload Data", "🛠 Admin Panel"]
 
-    page = st.radio("Menu", pages)
+    page = st.radio("Navigation", pages)
 
     if st.button("Logout"):
         st.session_state.clear()
         st.rerun()
 
-# ---------------- HELPERS --------------
-
+# ---------------- HELPERS ----------------
 def norm(x):
     if pd.isna(x):
         return ""
     x = str(x).lower().strip()
-    x = re.sub(r'[^a-z0-9]', '', x)   # remove symbols
-    x = x.lstrip('0')                 # 🔥 REMOVE LEADING ZEROS
+    x = re.sub(r'[^a-z0-9]', '', x)
+    x = x.lstrip('0')
     return x
 
 def safe_float(v):
@@ -149,7 +203,6 @@ if page == "📊 Price Lookup":
     db_df["brand"] = db_df["brand"].astype(str).str.strip()
     brand_list = sorted(db_df["brand"].unique())
 
-    # 🔥 ADD NORMALIZED COLUMNS
     db_df["part_norm"] = db_df["part_no"].apply(norm)
     db_df["brand_norm"] = db_df["brand"].apply(norm)
 
