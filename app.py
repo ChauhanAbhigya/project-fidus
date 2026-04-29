@@ -11,51 +11,51 @@ DATABASE_URL = "postgresql://parts_db_bi6b_user:vVxgefrTwrWGoHwzIPXbfemlrb4Fn6GW
 conn = psycopg2.connect(DATABASE_URL)
 cur = conn.cursor()
 
-# ---------------- PAGE CONFIG ----------------
-st.set_page_config(
-    layout="wide",
-    page_title="Parts System",
-    page_icon="⚙️"
-)
+# ---------------- PAGE ----------------
+st.set_page_config(layout="wide", page_title="Parts System")
 
-# ---------------- LIGHT MINIMAL UI ----------------
+# ---------------- COLORFUL LIGHT UI ----------------
 st.markdown("""
 <style>
 
-/* Light background */
+/* Main background (soft pastel gradient) */
 .stApp {
-    background: linear-gradient(180deg, #f7f9fc, #eef3f8);
-    font-family: 'Segoe UI', system-ui, sans-serif;
+    background: linear-gradient(120deg, #fdfbfb 0%, #ebedee 100%);
+    font-family: 'Segoe UI', system-ui;
     color: #1f2937;
 }
 
-/* Main container */
+/* Content card */
 .block-container {
     padding: 2rem;
 }
 
-/* Cards feel */
-div[data-testid="stVerticalBlock"] {
-    background: white;
-    padding: 18px;
-    border-radius: 14px;
-    box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+/* Sidebar gradient accent */
+section[data-testid="stSidebar"] {
+    background: linear-gradient(180deg, #ffffff, #f3f8ff);
+    border-right: 1px solid #e5e7eb;
 }
 
-/* Buttons - minimal */
+/* LOGO spacing */
+img {
+    border-radius: 10px;
+}
+
+/* Buttons - pastel gradient */
 div.stButton > button {
-    background: #ffffff;
-    color: #2563eb;
-    border: 1px solid #d1d5db;
-    border-radius: 8px;
-    padding: 0.4rem 1rem;
-    font-weight: 500;
+    background: linear-gradient(90deg, #a1c4fd, #c2e9fb);
+    color: #1f2937;
+    border: none;
+    border-radius: 10px;
+    padding: 0.45rem 1rem;
+    font-weight: 600;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
     transition: 0.2s;
 }
 
 div.stButton > button:hover {
-    border-color: #2563eb;
-    color: #1d4ed8;
+    transform: scale(1.02);
+    background: linear-gradient(90deg, #c2e9fb, #a1c4fd);
 }
 
 /* Inputs */
@@ -64,21 +64,31 @@ input, textarea {
     border: 1px solid #d1d5db !important;
 }
 
-/* Sidebar */
-section[data-testid="stSidebar"] {
-    background: #ffffff;
-    border-right: 1px solid #e5e7eb;
+/* HEADINGS */
+h1, h2, h3 {
+    font-weight: 600;
+    color: #111827;
 }
 
-/* Titles */
-h1, h2, h3 {
-    color: #111827;
+/* ---------------- TABLE OVERRIDE ---------------- */
+div[data-testid="stDataFrame"] {
+    background: linear-gradient(135deg, #ffffff, #f7fbff);
+    border-radius: 12px;
+    padding: 10px;
+    box-shadow: 0 3px 12px rgba(0,0,0,0.05);
+}
+
+/* Table header feel */
+thead tr th {
+    background: linear-gradient(90deg, #dbeafe, #eff6ff) !important;
+    color: #1e3a8a !important;
     font-weight: 600;
 }
 
-/* Dataframe */
-.stDataFrame {
-    border-radius: 10px;
+/* Table rows hover effect */
+tbody tr:hover {
+    background: #f0f9ff !important;
+    transition: 0.2s;
 }
 
 </style>
@@ -145,7 +155,7 @@ if st.session_state.user is None:
     with col2:
         st.image("logo.png", width=180)
 
-        st.markdown("### Login to continue")
+        st.markdown("### Welcome Back")
 
         u = st.text_input("Username")
         p = st.text_input("Password", type="password")
@@ -163,15 +173,14 @@ username = st.session_state.user["username"]
 
 # ---------------- SIDEBAR ----------------
 with st.sidebar:
-
     st.image("logo.png", width=140)
-    st.markdown(f"### {username}")
+    st.markdown(f"### 👤 {username}")
 
     pages = ["📊 Price Lookup"]
     if username == "admin":
         pages += ["📤 Upload Data", "🛠 Admin Panel"]
 
-    page = st.radio("Menu", pages)
+    page = st.radio("Navigation", pages)
 
     if st.button("Logout"):
         st.session_state.clear()
@@ -202,7 +211,7 @@ def safe_int(v):
 # ================= PRICE LOOKUP =================
 if page == "📊 Price Lookup":
 
-    st.title("Price Lookup")
+    st.title("📊 Price Lookup")
 
     db_df = load_parts()
 
@@ -218,7 +227,7 @@ if page == "📊 Price Lookup":
 
     col1, col2 = st.columns([10,1])
     with col2:
-        if st.button("Refresh"):
+        if st.button("🔄 Refresh"):
             st.cache_data.clear()
             st.rerun()
 
@@ -231,7 +240,7 @@ if page == "📊 Price Lookup":
         }
     )
 
-    if st.button("Fetch Prices"):
+    if st.button("🔎 Fetch Prices"):
 
         result = []
 
@@ -273,85 +282,3 @@ if page == "📊 Price Lookup":
 
     st.dataframe(df, use_container_width=True)
     st.success(f"Total: € {df['Amount'].sum():.2f}")
-
-# ================= UPLOAD =================
-elif page == "📤 Upload Data":
-
-    st.title("Upload Data")
-
-    files = st.file_uploader("Upload Excel", type=["xlsx"], accept_multiple_files=True)
-
-    if files:
-        total = 0
-
-        for f in files:
-
-            df = pd.read_excel(f)
-            df.columns = df.columns.str.strip().str.lower()
-
-            df.rename(columns={
-                "part no":"part_no",
-                "price [eur]":"price",
-                "item description":"description"
-            }, inplace=True)
-
-            df["part_no"] = df["part_no"].astype(str)
-            df["brand"] = df["brand"].astype(str)
-            df["price"] = pd.to_numeric(df["price"], errors="coerce")
-
-            df = df.fillna(0)
-
-            values = [
-                (
-                    r["part_no"],
-                    r["brand"],
-                    safe_float(r["price"]),
-                    r.get("description"),
-                    safe_int(r.get("moq"))
-                )
-                for _, r in df.iterrows()
-            ]
-
-            query = """
-            INSERT INTO parts_table (part_no, brand, price, description, moq)
-            VALUES %s
-            """
-
-            execute_values(cur, query, values)
-            conn.commit()
-
-            total += len(values)
-
-        st.cache_data.clear()
-        st.success(f"Uploaded {total} rows")
-
-# ================= ADMIN =================
-elif page == "🛠 Admin Panel":
-
-    if username != "admin":
-        st.error("Access Denied")
-        st.stop()
-
-    st.title("Admin Panel")
-
-    st.subheader("Add User")
-    u = st.text_input("Username")
-    p = st.text_input("Password", type="password")
-
-    if st.button("Add User"):
-        cur.execute("INSERT INTO users (username,password) VALUES (%s,%s)",(u,p))
-        conn.commit()
-        st.success("User added")
-
-    st.subheader("Remove User")
-
-    cur.execute("SELECT username FROM users WHERE username!='admin'")
-    users = [x[0] for x in cur.fetchall()]
-
-    if users:
-        d = st.selectbox("Select user", users)
-
-        if st.button("Delete User"):
-            cur.execute("DELETE FROM users WHERE username=%s",(d,))
-            conn.commit()
-            st.success("User removed")
