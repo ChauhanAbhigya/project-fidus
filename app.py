@@ -72,8 +72,6 @@ WHERE NOT EXISTS (SELECT 1 FROM users WHERE username='admin')
 """)
 
 conn.commit()
-st.cache_data.clear()
-st.rerun()
 
 # ---------------- CACHE ----------------
 @st.cache_data
@@ -170,6 +168,11 @@ if page == "📊 Price Lookup ":
         }
     )
 
+    # 🔄 Manual refresh button (optional)
+    if st.button("🔄 Refresh Data"):
+        st.cache_data.clear()
+        st.rerun()
+
     if st.button("Get Pricing"):
         result = []
         for _, r in input_df.iterrows():
@@ -204,7 +207,6 @@ if page == "📊 Price Lookup ":
             )
             conn.commit()
             st.success("Quotation saved successfully")
-            
 
 # ================= SAVED QUOTATIONS =================
 elif page == "📁 Saved Quotations":
@@ -234,17 +236,13 @@ elif page == "📁 Saved Quotations":
 
     final_df = pd.concat(all_data, ignore_index=True)
 
-    # Filter
     employees = ["All"] + sorted(final_df["Employee"].unique())
     selected_emp = st.selectbox("Filter by Employee", employees)
 
     if selected_emp != "All":
         final_df = final_df[final_df["Employee"] == selected_emp]
 
-    # Trim description (no scroll)
     final_df["Description"] = final_df["Description"].astype(str).str.slice(0, 40)
-
-    # Checkbox first column
     final_df.insert(0, "Select", False)
 
     edited_df = st.data_editor(
@@ -264,24 +262,20 @@ elif page == "📁 Saved Quotations":
         }
     )
 
-    # Download
     output = BytesIO()
     final_df.to_excel(output, index=False)
     output.seek(0)
 
     st.download_button("⬇ Download Excel", output, file_name="saved_offers.xlsx")
 
-    # Delete
     st.markdown("---")
     st.subheader("🗑 Delete Selected Quotations")
 
     if st.button("Delete Selected Quotations"):
-
         selected_rows = edited_df[edited_df["Select"] == True]
 
         if selected_rows.empty:
             st.warning("No rows selected")
-
         else:
             ids_to_delete = selected_rows["Offer ID"].unique().tolist()
 
@@ -304,11 +298,8 @@ elif page == "📤 Data Upload":
     if files:
         for f in files:
             df = pd.read_excel(f)
-
-            # 🔥 Normalize columns
             df.columns = df.columns.str.strip().str.lower()
 
-            # 🔥 Exact rename based on your format
             df.rename(columns={
                 "part no": "part_no",
                 "price [eur]": "price",
@@ -316,34 +307,12 @@ elif page == "📤 Data Upload":
                 "moq": "moq"
             }, inplace=True)
 
-            # 🔥 Validate
-            required = ["part_no", "brand", "price"]
-            missing = [c for c in required if c not in df.columns]
-
-            if missing:
-                st.error(f"Missing columns: {missing}")
-                st.stop()
-
-            # 🔥 Clean data
             df["part_no"] = df["part_no"].astype(str)
             df["brand"] = df["brand"].astype(str)
             df["price"] = pd.to_numeric(df["price"], errors="coerce").fillna(0)
 
-            if "description" not in df.columns:
-                df["description"] = ""
-
-            if "moq" not in df.columns:
-                df["moq"] = 0
-
-            # 🔥 Insert
             values = [
-                (
-                    r["part_no"],
-                    r["brand"],
-                    float(r["price"]),
-                    r["description"],
-                    int(r["moq"]) if pd.notna(r["moq"]) else 0
-                )
+                (r["part_no"], r["brand"], float(r["price"]), r.get("description",""), int(r.get("moq",0)))
                 for _, r in df.iterrows()
             ]
 
@@ -354,7 +323,10 @@ elif page == "📤 Data Upload":
             )
             conn.commit()
 
+        # 🔥 FIX: refresh cache + UI
+        st.cache_data.clear()
         st.success("Uploaded successfully")
+        st.rerun()
 
 # ================= ADMIN =================
 elif page == "🛠Access Control":
