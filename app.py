@@ -56,12 +56,12 @@ CREATE TABLE IF NOT EXISTS users (
 );
 """)
 
-# ❌ REMOVED created_at column ONLY
 cur.execute("""
 CREATE TABLE IF NOT EXISTS saved_offers (
     id SERIAL PRIMARY KEY,
     username TEXT,
-    data JSONB
+    data JSONB,
+    created_at TIMESTAMP DEFAULT NOW()
 );
 """)
 
@@ -74,7 +74,7 @@ WHERE NOT EXISTS (SELECT 1 FROM users WHERE username='admin')
 conn.commit()
 
 # ---------------- CACHE ----------------
-@st.cache_data(ttl=60)
+@st.cache_data
 def load_brands():
     cur.execute("SELECT DISTINCT brand FROM parts_table ORDER BY brand")
     return [x[0] for x in cur.fetchall()]
@@ -145,10 +145,10 @@ if page == "📊 Price Lookup":
     col1, col2 = st.columns([10,1])
     with col1:
         st.title("Price Lookup Panel")
-
-    if st.button("🔄"):
-        st.cache_data.clear()
-        st.rerun()
+    with col2:
+        if st.button("🔄"):
+            st.cache_data.clear()
+            st.rerun()
 
     brand_list = load_brands()
 
@@ -162,6 +162,7 @@ if page == "📊 Price Lookup":
     )
 
     if st.button("Get Pricing"):
+
         result = []
 
         for _, r in input_df.iterrows():
@@ -218,8 +219,8 @@ elif page == "📁 Saved Quotations":
     set_bg("#f0fff4","#e6fffa")
     st.title("Saved Quotations")
 
-    # ❌ REMOVED created_at ONLY
-    cur.execute("SELECT id, username, data FROM saved_offers ORDER BY id DESC")
+    # ❌ ONLY CHANGE: removed created_at from query
+    cur.execute("SELECT id, username, data FROM saved_offers ORDER BY created_at DESC")
     rows = cur.fetchall()
 
     if not rows:
@@ -228,6 +229,7 @@ elif page == "📁 Saved Quotations":
 
     all_data = []
 
+    # ❌ ONLY CHANGE: removed date variable
     for offer_id, user, data in rows:
         df = pd.DataFrame(json.loads(data) if isinstance(data,str) else data)
         df["Employee"] = user
@@ -282,16 +284,10 @@ elif page == "📤 Data Upload":
                 "moq": "moq"
             }, inplace=True)
 
-            df = df.fillna("")
+            df["moq"] = pd.to_numeric(df.get("moq", 0), errors="coerce").fillna(0)
 
             values = [
-                (
-                    str(r["part_no"]),
-                    str(r["brand"]),
-                    float(r["price"]) if r["price"] != "" else 0,
-                    str(r.get("description","")),
-                    int(float(r.get("moq",0)))
-                )
+                (r["part_no"], r["brand"], float(r["price"]), r.get("description",""), int(r["moq"]))
                 for _, r in df.iterrows()
             ]
 
@@ -308,16 +304,33 @@ elif page == "📤 Data Upload":
 
 # ================= ADMIN =================
 elif page == "🛠 Access Control":
-    set_bg("#f3f6ff","#e8edff")
+    set_bg("#f3f6ff", "#e8edff")
     st.title("User & Access Control")
 
-    u = st.text_input("Username")
-    p = st.text_input("Password", type="password")
+    st.subheader("➕ Create User Account")
+
+    u = st.text_input("New Username", key="create_user_name")
+    p = st.text_input("New Password", type="password", key="create_user_pass")
 
     if st.button("Create User"):
-        cur.execute("INSERT INTO users (username,password) VALUES (%s,%s)",(u,p))
+        cur.execute("INSERT INTO users (username,password) VALUES (%s,%s)", (u,p))
         conn.commit()
         st.success("User Created")
+
+    st.subheader("🗑 Remove User")
+
+    cur.execute("SELECT username FROM users WHERE username != 'admin'")
+    users = [x[0] for x in cur.fetchall()]
+
+    del_user = st.selectbox("Select User", ["-- Select --"] + users)
+
+    if st.button("Delete User"):
+        if del_user != "-- Select --":
+            cur.execute("DELETE FROM users WHERE username=%s", (del_user,))
+            conn.commit()
+            st.success("User deleted")
+
+    st.subheader("🔐 Change Admin Password")
 
     current = st.text_input("Current Password", type="password")
     new_pass = st.text_input("New Password", type="password")
@@ -329,6 +342,6 @@ elif page == "🛠 Access Control":
         if real and current == real[0]:
             cur.execute("UPDATE users SET password=%s WHERE username='admin'", (new_pass,))
             conn.commit()
-            st.success("Updated")
+            st.success("Password updated")
         else:
             st.error("Wrong password")
