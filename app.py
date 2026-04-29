@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import psycopg2
 from psycopg2.extras import execute_values
-import math
 import re
 import json
 from io import BytesIO
@@ -13,8 +12,29 @@ DATABASE_URL = "postgresql://parts_db_bi6b_user:vVxgefrTwrWGoHwzIPXbfemlrb4Fn6GW
 conn = psycopg2.connect(DATABASE_URL)
 cur = conn.cursor()
 
-# ---------------- PAGE ----------------
-st.set_page_config(layout="wide", page_title="Parts System")
+st.set_page_config(layout="wide")
+
+st.markdown("""
+<style>
+section[data-testid="stSidebar"] {
+    width: 280px !important;
+}
+section[data-testid="stSidebar"] > div {
+    width: 280px !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# ---------------- BG ----------------
+def set_bg(c1, c2):
+    st.markdown(f"""
+    <style>
+    .stApp {{
+        background: linear-gradient(135deg, {c1} 0%, {c2} 100%);
+        background-attachment: fixed;
+    }}
+    </style>
+    """, unsafe_allow_html=True)
 
 # ---------------- TABLES ----------------
 cur.execute("""
@@ -40,16 +60,15 @@ cur.execute("""
 CREATE TABLE IF NOT EXISTS saved_offers (
     id SERIAL PRIMARY KEY,
     username TEXT,
-    offer_name TEXT,
     data JSONB,
     created_at TIMESTAMP DEFAULT NOW()
 );
 """)
 
 cur.execute("""
-INSERT INTO users (username, password)
+INSERT INTO users (username,password)
 SELECT 'admin','admin'
-WHERE NOT EXISTS (SELECT 1 FROM users WHERE username='admin');
+WHERE NOT EXISTS (SELECT 1 FROM users WHERE username='admin')
 """)
 
 conn.commit()
@@ -63,14 +82,10 @@ def load_parts():
 
 # ---------------- SESSION ----------------
 if "table_data" not in st.session_state:
-    st.session_state.table_data = pd.DataFrame(
-        columns=["Brand","Part No","Description","Qty","Price","Amount"]
-    )
+    st.session_state.table_data = pd.DataFrame(columns=["Brand","Part No","Description","Qty","Price","Amount"])
 
 if "input_table" not in st.session_state:
-    st.session_state.input_table = pd.DataFrame(
-        columns=["Brand","Part No","Qty"]
-    )
+    st.session_state.input_table = pd.DataFrame(columns=["Brand","Part No","Qty"])
 
 if "user" not in st.session_state:
     st.session_state.user = None
@@ -81,17 +96,24 @@ def login(u,p):
     return cur.fetchone()
 
 if st.session_state.user is None:
-    st.title("Login")
 
-    u = st.text_input("Username")
-    p = st.text_input("Password", type="password")
+    st.markdown("<style>section[data-testid='stSidebar']{display:none;}</style>", unsafe_allow_html=True)
+    set_bg("#eef4ff","#f8fbff")
 
-    if st.button("Login"):
-        if login(u,p):
-            st.session_state.user = {"username":u}
-            st.rerun()
-        else:
-            st.error("Invalid credentials")
+    col1,col2,col3 = st.columns([1,2,1])
+    with col2:
+        st.image("logo.png", width=170)
+        st.markdown("### 👤Sign In")
+
+        u = st.text_input("Enter Username")
+        p = st.text_input("Enter Password", type="password")
+
+        if st.button("Click me to Continue"):
+            if login(u,p):
+                st.session_state.user = {"username":u}
+                st.rerun()
+            else:
+                st.error("Invalid credentials")
 
     st.stop()
 
@@ -99,14 +121,17 @@ username = st.session_state.user["username"]
 
 # ---------------- SIDEBAR ----------------
 with st.sidebar:
+    st.image("logo.png", width=150)
     st.markdown(f"### 👤 {username}")
 
-    pages = ["📊 Price Lookup", "📁 Saved Offers"]
-
     if username == "admin":
-        pages += ["📤 Upload Data", "🛠 Admin Panel"]
+        pages = ["📊 Price Lookup ","📁 Saved Quotations","📤 Data Upload","🛠Access Control"]
+    else:
+        pages = ["📊 Price Lookup ","📁 Saved Quotations"]
 
-    page = st.radio("Navigation", pages)
+    page = st.radio("WorkSpace", pages)
+
+    st.markdown("---")
 
     if st.button("Logout"):
         st.session_state.clear()
@@ -114,36 +139,19 @@ with st.sidebar:
 
 # ---------------- HELPERS ----------------
 def norm(x):
-    if pd.isna(x):
-        return ""
-    x = str(x).lower().strip()
-    x = re.sub(r'[^a-z0-9]', '', x)
-    x = x.lstrip('0')
-    return x
+    if pd.isna(x): return ""
+    return re.sub(r'[^a-z0-9]', '', str(x).lower()).lstrip('0')
 
 def safe_float(v):
-    try:
-        if pd.isna(v): return 0
-        return float(v)
-    except:
-        return 0
-
-def safe_int(v):
-    try:
-        return int(float(v))
-    except:
-        return 0
+    try: return float(v)
+    except: return 0
 
 # ================= PRICE LOOKUP =================
-if page == "📊 Price Lookup":
-
-    st.title("📊 Price Lookup")
+if page == "📊 Price Lookup ":
+    set_bg("#f0f7ff","#e6f0ff")
+    st.title("Price Lookup Panel")
 
     db_df = load_parts()
-
-    if db_df.empty:
-        st.warning("No data found")
-        st.stop()
 
     db_df["brand"] = db_df["brand"].astype(str).str.strip()
     brand_list = sorted(db_df["brand"].unique())
@@ -160,35 +168,21 @@ if page == "📊 Price Lookup":
         }
     )
 
-    if st.button("Fetch Prices"):
-
+    if st.button("Get Pricing"):
         result = []
-
         for _, r in input_df.iterrows():
-
-            part = norm(r.get("Part No"))
-            brand = norm(r.get("Brand"))
-
-            qty = pd.to_numeric(r.get("Qty"), errors="coerce")
-            if pd.isna(qty) or qty<=0:
-                qty = 1
-
             match = db_df[
-                (db_df["part_norm"] == part) &
-                (db_df["brand_norm"] == brand)
+                (db_df["part_norm"] == norm(r["Part No"])) &
+                (db_df["brand_norm"] == norm(r["Brand"]))
             ]
 
-            if not match.empty:
-                row = match.iloc[0]
-                price = safe_float(row["price"])
-                desc = row.get("description","N/A")
-            else:
-                price = 0
-                desc = "Not Found"
+            price = match.iloc[0]["price"] if not match.empty else 0
+            desc = match.iloc[0]["description"] if not match.empty else "Not Found"
+            qty = int(r["Qty"]) if pd.notna(r["Qty"]) else 1
 
             result.append({
-                "Brand": r.get("Brand"),
-                "Part No": r.get("Part No"),
+                "Brand": r["Brand"],
+                "Part No": r["Part No"],
                 "Description": desc,
                 "Qty": qty,
                 "Price": price,
@@ -197,147 +191,157 @@ if page == "📊 Price Lookup":
 
         st.session_state.table_data = pd.DataFrame(result)
 
-    df = st.session_state.table_data.copy()
-    df["Amount"] = df["Qty"] * df["Price"]
-
+    df = st.session_state.table_data
     st.dataframe(df, use_container_width=True)
-    st.success(f"Total: € {df['Amount'].sum():.2f}")
 
-    # ---------------- SAVE OFFER ----------------
-    st.subheader("💾 Save Offer")
-
-    offer_name = st.text_input("Offer Name")
-
-    if st.button("Save Offer"):
-
-        if not df.empty and offer_name:
-
-            cur.execute("""
-                INSERT INTO saved_offers (username, offer_name, data)
-                VALUES (%s, %s, %s)
-            """, (username, offer_name, json.dumps(df.to_dict(orient="records"))))
-
+    if st.button("💾 Save Quotation"):
+        if not df.empty:
+            cur.execute(
+                "INSERT INTO saved_offers (username,data) VALUES (%s,%s)",
+                (username, json.dumps(df.to_dict(orient="records")))
+            )
             conn.commit()
-            st.success("Offer saved successfully")
+            st.success("Quotation saved successfully")
 
-# ================= SAVED OFFERS =================
-elif page == "📁 Saved Offers":
+# ================= SAVED QUOTATIONS =================
+elif page == "📁 Saved Quotations":
+    set_bg("#f0fff4","#e6fffa")
+    st.title("Saved Quotations")
 
-    st.title("📁 Saved Offers")
-
-    cur.execute("""
-        SELECT id, offer_name, data, created_at
-        FROM saved_offers
-        WHERE username=%s
-        ORDER BY created_at DESC
-    """, (username,))
-
+    cur.execute("SELECT id, username, data, created_at FROM saved_offers ORDER BY created_at DESC")
     rows = cur.fetchall()
 
     if not rows:
         st.info("No saved offers")
         st.stop()
 
-    for r in rows:
+    all_data = []
 
-        offer_id, name, data, created_at = r
+    for offer_id, user, data, date in rows:
+        if isinstance(data, str):
+            df = pd.DataFrame(json.loads(data))
+        else:
+            df = pd.DataFrame(data)
 
-        st.markdown(f"### 🧾 {name}")
-        st.caption(created_at)
+        df["Employee"] = user
+        df["Saved On"] = date
+        df["Offer ID"] = offer_id
 
-        df = pd.DataFrame(json.loads(data))
+        all_data.append(df)
 
-        st.dataframe(df, use_container_width=True)
+    final_df = pd.concat(all_data, ignore_index=True)
 
-        # Excel export
-        output = BytesIO()
-        df.to_excel(output, index=False)
-        output.seek(0)
+    # Filter
+    employees = ["All"] + sorted(final_df["Employee"].unique())
+    selected_emp = st.selectbox("Filter by Employee", employees)
 
-        st.download_button(
-            "⬇ Download Excel",
-            data=output,
-            file_name=f"{name}.xlsx"
-        )
+    if selected_emp != "All":
+        final_df = final_df[final_df["Employee"] == selected_emp]
 
-        st.markdown("---")
+    # Trim description (no scroll)
+    final_df["Description"] = final_df["Description"].astype(str).str.slice(0, 40)
+
+    # Checkbox first column
+    final_df.insert(0, "Select", False)
+
+    edited_df = st.data_editor(
+        final_df,
+        use_container_width=True,
+        height=350,
+        column_config={
+            "Select": st.column_config.CheckboxColumn("✔", width="small"),
+            "Brand": st.column_config.Column(width="small"),
+            "Part No": st.column_config.Column(width="small"),
+            "Description": st.column_config.Column(width="medium"),
+            "Qty": st.column_config.Column(width="small"),
+            "Price": st.column_config.Column(width="small"),
+            "Amount": st.column_config.Column(width="small"),
+            "Employee": st.column_config.Column(width="small"),
+            "Saved On": st.column_config.Column(width="small"),
+        }
+    )
+
+    # Download
+    output = BytesIO()
+    final_df.to_excel(output, index=False)
+    output.seek(0)
+
+    st.download_button("⬇ Download Excel", output, file_name="saved_offers.xlsx")
+
+    # Delete
+    st.markdown("---")
+    st.subheader("🗑 Delete Selected Quotations")
+
+    if st.button("Delete Selected Quotations"):
+
+        selected_rows = edited_df[edited_df["Select"] == True]
+
+        if selected_rows.empty:
+            st.warning("No rows selected")
+
+        else:
+            ids_to_delete = selected_rows["Offer ID"].unique().tolist()
+
+            cur.execute(
+                "DELETE FROM saved_offers WHERE id = ANY(%s)",
+                (ids_to_delete,)
+            )
+            conn.commit()
+
+            st.success(f"{len(ids_to_delete)} quotation(s) deleted")
+            st.rerun()
 
 # ================= UPLOAD =================
-elif page == "📤 Upload Data":
+elif page == "📤 Data Upload":
+    set_bg("#f5f0ff","#ede9fe")
+    st.title("Master Data Upload")
 
-    st.title("Upload Data")
-
-    files = st.file_uploader("Upload Excel", type=["xlsx"], accept_multiple_files=True)
+    files = st.file_uploader("Upload Price Sheet", type=["xlsx"], accept_multiple_files=True)
 
     if files:
-        total = 0
-
         for f in files:
-
             df = pd.read_excel(f)
-            df.columns = df.columns.str.strip().str.lower()
-
-            df.rename(columns={
-                "part no":"part_no",
-                "price [eur]":"price",
-                "item description":"description"
-            }, inplace=True)
-
-            df["part_no"] = df["part_no"].astype(str)
-            df["brand"] = df["brand"].astype(str)
-            df["price"] = pd.to_numeric(df["price"], errors="coerce")
-
-            df = df.fillna(0)
+            df.columns = df.columns.str.lower()
 
             values = [
-                (
-                    r["part_no"],
-                    r["brand"],
-                    safe_float(r["price"]),
-                    r.get("description"),
-                    safe_int(r.get("moq"))
-                )
+                (r["part_no"], r["brand"], safe_float(r["price"]), r.get("description"), 0)
                 for _, r in df.iterrows()
             ]
 
-            execute_values(cur,
-                "INSERT INTO parts_table (part_no, brand, price, description, moq) VALUES %s",
+            execute_values(
+                cur,
+                "INSERT INTO parts_table (part_no,brand,price,description,moq) VALUES %s",
                 values
             )
-
             conn.commit()
-            total += len(values)
 
-        st.cache_data.clear()
-        st.success(f"Uploaded {total} rows")
+        st.success("Uploaded")
 
 # ================= ADMIN =================
-elif page == "🛠 Admin Panel":
+elif page == "🛠Access Control":
+    set_bg("#f3f6ff","#e8edff")
+    st.title("User & Access Control")
 
-    if username != "admin":
-        st.error("Access Denied")
-        st.stop()
-
-    st.title("Admin Panel")
-
-    st.subheader("Add User")
+    st.subheader("➕ Create User Account")
     u = st.text_input("Username")
     p = st.text_input("Password", type="password")
 
-    if st.button("Add User"):
+    if st.button("Create User"):
         cur.execute("INSERT INTO users (username,password) VALUES (%s,%s)",(u,p))
         conn.commit()
-        st.success("User added")
+        st.success("User Created")
 
-    st.subheader("Remove User")
+    st.subheader("🔐Update Admin Credentials")
+    current = st.text_input("Current Password", type="password")
+    new_pass = st.text_input("New Password", type="password")
 
-    cur.execute("SELECT username FROM users WHERE username!='admin'")
-    users = [x[0] for x in cur.fetchall()]
+    if st.button("Update Password"):
+        cur.execute("SELECT password FROM users WHERE username='admin'")
+        real_pass = cur.fetchone()[0]
 
-    if users:
-        d = st.selectbox("Select user", users)
-
-        if st.button("Delete User"):
-            cur.execute("DELETE FROM users WHERE username=%s",(d,))
+        if current == real_pass:
+            cur.execute("UPDATE users SET password=%s WHERE username='admin'", (new_pass,))
             conn.commit()
-            st.success("User removed")
+            st.success("Password updated")
+        else:
+            st.error("Wrong current password")
