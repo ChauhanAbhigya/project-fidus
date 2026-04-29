@@ -72,6 +72,8 @@ WHERE NOT EXISTS (SELECT 1 FROM users WHERE username='admin')
 """)
 
 conn.commit()
+st.cache_data.clear()
+st.rerun()
 
 # ---------------- CACHE ----------------
 @st.cache_data
@@ -202,6 +204,7 @@ if page == "📊 Price Lookup ":
             )
             conn.commit()
             st.success("Quotation saved successfully")
+            
 
 # ================= SAVED QUOTATIONS =================
 elif page == "📁 Saved Quotations":
