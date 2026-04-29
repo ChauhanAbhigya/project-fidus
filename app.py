@@ -102,8 +102,8 @@ if st.session_state.user is None:
 
     col1,col2,col3 = st.columns([1,2,1])
     with col2:
-        st.image("logo.png", width=170)
-        st.markdown("### 👤Sign In")
+        st.image("logo.png", width=160)
+        st.markdown("### 👤 Sign In")
 
         u = st.text_input("Enter Username")
         p = st.text_input("Enter Password", type="password")
@@ -121,13 +121,13 @@ username = st.session_state.user["username"]
 
 # ---------------- SIDEBAR ----------------
 with st.sidebar:
-    st.image("logo.png", width=150)
+    st.image("logo.png", width=140)
     st.markdown(f"### 👤 {username}")
 
     if username == "admin":
-        pages = ["📊 Price Lookup ","📁 Saved Quotations","📤 Data Upload","🛠Access Control"]
+        pages = ["📊 Price Lookup","📁 Saved Quotations","📤 Data Upload","🛠 Access Control"]
     else:
-        pages = ["📊 Price Lookup ","📁 Saved Quotations"]
+        pages = ["📊 Price Lookup","📁 Saved Quotations"]
 
     page = st.radio("WorkSpace", pages)
 
@@ -147,9 +147,16 @@ def safe_float(v):
     except: return 0
 
 # ================= PRICE LOOKUP =================
-if page == "📊 Price Lookup ":
+if page == "📊 Price Lookup":
     set_bg("#f0f7ff","#e6f0ff")
-    st.title("Price Lookup Panel")
+
+    col1, col2 = st.columns([10,1])
+    with col1:
+        st.title("Price Lookup Panel")
+    with col2:
+        if st.button("🔄"):
+            st.cache_data.clear()
+            st.rerun()
 
     db_df = load_parts()
 
@@ -167,11 +174,6 @@ if page == "📊 Price Lookup ":
             "Brand": st.column_config.SelectboxColumn("Brand", options=brand_list)
         }
     )
-
-    # 🔄 Manual refresh button (optional)
-    if st.button("🔄 Refresh Data"):
-        st.cache_data.clear()
-        st.rerun()
 
     if st.button("Get Pricing"):
         result = []
@@ -223,15 +225,10 @@ elif page == "📁 Saved Quotations":
     all_data = []
 
     for offer_id, user, data, date in rows:
-        if isinstance(data, str):
-            df = pd.DataFrame(json.loads(data))
-        else:
-            df = pd.DataFrame(data)
-
+        df = pd.DataFrame(json.loads(data) if isinstance(data,str) else data)
         df["Employee"] = user
         df["Saved On"] = date
         df["Offer ID"] = offer_id
-
         all_data.append(df)
 
     final_df = pd.concat(all_data, ignore_index=True)
@@ -245,22 +242,7 @@ elif page == "📁 Saved Quotations":
     final_df["Description"] = final_df["Description"].astype(str).str.slice(0, 40)
     final_df.insert(0, "Select", False)
 
-    edited_df = st.data_editor(
-        final_df,
-        use_container_width=True,
-        height=350,
-        column_config={
-            "Select": st.column_config.CheckboxColumn("✔", width="small"),
-            "Brand": st.column_config.Column(width="small"),
-            "Part No": st.column_config.Column(width="small"),
-            "Description": st.column_config.Column(width="medium"),
-            "Qty": st.column_config.Column(width="small"),
-            "Price": st.column_config.Column(width="small"),
-            "Amount": st.column_config.Column(width="small"),
-            "Employee": st.column_config.Column(width="small"),
-            "Saved On": st.column_config.Column(width="small"),
-        }
-    )
+    edited_df = st.data_editor(final_df, use_container_width=True, height=350)
 
     output = BytesIO()
     final_df.to_excel(output, index=False)
@@ -269,23 +251,14 @@ elif page == "📁 Saved Quotations":
     st.download_button("⬇ Download Excel", output, file_name="saved_offers.xlsx")
 
     st.markdown("---")
-    st.subheader("🗑 Delete Selected Quotations")
-
     if st.button("Delete Selected Quotations"):
-        selected_rows = edited_df[edited_df["Select"] == True]
+        selected = edited_df[edited_df["Select"] == True]
 
-        if selected_rows.empty:
-            st.warning("No rows selected")
-        else:
-            ids_to_delete = selected_rows["Offer ID"].unique().tolist()
-
-            cur.execute(
-                "DELETE FROM saved_offers WHERE id = ANY(%s)",
-                (ids_to_delete,)
-            )
+        if not selected.empty:
+            ids = selected["Offer ID"].unique().tolist()
+            cur.execute("DELETE FROM saved_offers WHERE id = ANY(%s)", (ids,))
             conn.commit()
-
-            st.success(f"{len(ids_to_delete)} quotation(s) deleted")
+            st.success("Deleted successfully")
             st.rerun()
 
 # ================= UPLOAD =================
@@ -307,33 +280,28 @@ elif page == "📤 Data Upload":
                 "moq": "moq"
             }, inplace=True)
 
-            df["part_no"] = df["part_no"].astype(str)
-            df["brand"] = df["brand"].astype(str)
-            df["price"] = pd.to_numeric(df["price"], errors="coerce").fillna(0)
+            df["moq"] = pd.to_numeric(df.get("moq", 0), errors="coerce").fillna(0)
 
             values = [
-                (r["part_no"], r["brand"], float(r["price"]), r.get("description",""), int(r.get("moq",0)))
+                (r["part_no"], r["brand"], float(r["price"]), r.get("description",""), int(r["moq"]))
                 for _, r in df.iterrows()
             ]
 
-            execute_values(
-                cur,
+            execute_values(cur,
                 "INSERT INTO parts_table (part_no,brand,price,description,moq) VALUES %s",
                 values
             )
             conn.commit()
 
-        # 🔥 FIX: refresh cache + UI
         st.cache_data.clear()
         st.success("Uploaded successfully")
         st.rerun()
 
 # ================= ADMIN =================
-elif page == "🛠Access Control":
+elif page == "🛠 Access Control":
     set_bg("#f3f6ff","#e8edff")
     st.title("User & Access Control")
 
-    st.subheader("➕ Create User Account")
     u = st.text_input("Username")
     p = st.text_input("Password", type="password")
 
@@ -342,17 +310,14 @@ elif page == "🛠Access Control":
         conn.commit()
         st.success("User Created")
 
-    st.subheader("🔐Update Admin Credentials")
     current = st.text_input("Current Password", type="password")
     new_pass = st.text_input("New Password", type="password")
 
     if st.button("Update Password"):
         cur.execute("SELECT password FROM users WHERE username='admin'")
-        real_pass = cur.fetchone()[0]
-
-        if current == real_pass:
+        if current == cur.fetchone()[0]:
             cur.execute("UPDATE users SET password=%s WHERE username='admin'", (new_pass,))
             conn.commit()
-            st.success("Password updated")
+            st.success("Updated")
         else:
-            st.error("Wrong current password")
+            st.error("Wrong password")
