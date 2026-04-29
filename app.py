@@ -4,6 +4,8 @@ import psycopg2
 from psycopg2.extras import execute_values
 import math
 import re
+import json
+from io import BytesIO
 
 # ---------------- DB ----------------
 DATABASE_URL = "postgresql://parts_db_bi6b_user:vVxgefrTwrWGoHwzIPXbfemlrb4Fn6GW@dpg-d7o8oqgg4nts73aagbcg-a.oregon-postgres.render.com/parts_db_bi6b"
@@ -13,86 +15,6 @@ cur = conn.cursor()
 
 # ---------------- PAGE ----------------
 st.set_page_config(layout="wide", page_title="Parts System")
-
-# ---------------- COLORFUL LIGHT UI ----------------
-st.markdown("""
-<style>
-
-/* Main background (soft pastel gradient) */
-.stApp {
-    background: linear-gradient(120deg, #fdfbfb 0%, #ebedee 100%);
-    font-family: 'Segoe UI', system-ui;
-    color: #1f2937;
-}
-
-/* Content card */
-.block-container {
-    padding: 2rem;
-}
-
-/* Sidebar gradient accent */
-section[data-testid="stSidebar"] {
-    background: linear-gradient(180deg, #ffffff, #f3f8ff);
-    border-right: 1px solid #e5e7eb;
-}
-
-/* LOGO spacing */
-img {
-    border-radius: 10px;
-}
-
-/* Buttons - pastel gradient */
-div.stButton > button {
-    background: linear-gradient(90deg, #a1c4fd, #c2e9fb);
-    color: #1f2937;
-    border: none;
-    border-radius: 10px;
-    padding: 0.45rem 1rem;
-    font-weight: 600;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
-    transition: 0.2s;
-}
-
-div.stButton > button:hover {
-    transform: scale(1.02);
-    background: linear-gradient(90deg, #c2e9fb, #a1c4fd);
-}
-
-/* Inputs */
-input, textarea {
-    border-radius: 8px !important;
-    border: 1px solid #d1d5db !important;
-}
-
-/* HEADINGS */
-h1, h2, h3 {
-    font-weight: 600;
-    color: #111827;
-}
-
-/* ---------------- TABLE OVERRIDE ---------------- */
-div[data-testid="stDataFrame"] {
-    background: linear-gradient(135deg, #ffffff, #f7fbff);
-    border-radius: 12px;
-    padding: 10px;
-    box-shadow: 0 3px 12px rgba(0,0,0,0.05);
-}
-
-/* Table header feel */
-thead tr th {
-    background: linear-gradient(90deg, #dbeafe, #eff6ff) !important;
-    color: #1e3a8a !important;
-    font-weight: 600;
-}
-
-/* Table rows hover effect */
-tbody tr:hover {
-    background: #f0f9ff !important;
-    transition: 0.2s;
-}
-
-</style>
-""", unsafe_allow_html=True)
 
 # ---------------- TABLES ----------------
 cur.execute("""
@@ -111,6 +33,16 @@ CREATE TABLE IF NOT EXISTS users (
     id SERIAL PRIMARY KEY,
     username TEXT UNIQUE,
     password TEXT
+);
+""")
+
+cur.execute("""
+CREATE TABLE IF NOT EXISTS saved_offers (
+    id SERIAL PRIMARY KEY,
+    username TEXT,
+    offer_name TEXT,
+    data JSONB,
+    created_at TIMESTAMP DEFAULT NOW()
 );
 """)
 
@@ -149,23 +81,17 @@ def login(u,p):
     return cur.fetchone()
 
 if st.session_state.user is None:
+    st.title("Login")
 
-    col1, col2, col3 = st.columns([1,2,1])
+    u = st.text_input("Username")
+    p = st.text_input("Password", type="password")
 
-    with col2:
-        st.image("logo.png", width=180)
-
-        st.markdown("### Welcome Back")
-
-        u = st.text_input("Username")
-        p = st.text_input("Password", type="password")
-
-        if st.button("Login"):
-            if login(u,p):
-                st.session_state.user = {"username":u}
-                st.rerun()
-            else:
-                st.error("Invalid credentials")
+    if st.button("Login"):
+        if login(u,p):
+            st.session_state.user = {"username":u}
+            st.rerun()
+        else:
+            st.error("Invalid credentials")
 
     st.stop()
 
@@ -173,10 +99,10 @@ username = st.session_state.user["username"]
 
 # ---------------- SIDEBAR ----------------
 with st.sidebar:
-    st.image("logo.png", width=140)
     st.markdown(f"### 👤 {username}")
 
-    pages = ["📊 Price Lookup"]
+    pages = ["📊 Price Lookup", "📁 Saved Offers"]
+
     if username == "admin":
         pages += ["📤 Upload Data", "🛠 Admin Panel"]
 
@@ -225,12 +151,6 @@ if page == "📊 Price Lookup":
     db_df["part_norm"] = db_df["part_no"].apply(norm)
     db_df["brand_norm"] = db_df["brand"].apply(norm)
 
-    col1, col2 = st.columns([10,1])
-    with col2:
-        if st.button("🔄 Refresh"):
-            st.cache_data.clear()
-            st.rerun()
-
     input_df = st.data_editor(
         st.session_state.input_table,
         num_rows="dynamic",
@@ -240,7 +160,7 @@ if page == "📊 Price Lookup":
         }
     )
 
-    if st.button("🔎 Fetch Prices"):
+    if st.button("Fetch Prices"):
 
         result = []
 
@@ -282,3 +202,142 @@ if page == "📊 Price Lookup":
 
     st.dataframe(df, use_container_width=True)
     st.success(f"Total: € {df['Amount'].sum():.2f}")
+
+    # ---------------- SAVE OFFER ----------------
+    st.subheader("💾 Save Offer")
+
+    offer_name = st.text_input("Offer Name")
+
+    if st.button("Save Offer"):
+
+        if not df.empty and offer_name:
+
+            cur.execute("""
+                INSERT INTO saved_offers (username, offer_name, data)
+                VALUES (%s, %s, %s)
+            """, (username, offer_name, json.dumps(df.to_dict(orient="records"))))
+
+            conn.commit()
+            st.success("Offer saved successfully")
+
+# ================= SAVED OFFERS =================
+elif page == "📁 Saved Offers":
+
+    st.title("📁 Saved Offers")
+
+    cur.execute("""
+        SELECT id, offer_name, data, created_at
+        FROM saved_offers
+        WHERE username=%s
+        ORDER BY created_at DESC
+    """, (username,))
+
+    rows = cur.fetchall()
+
+    if not rows:
+        st.info("No saved offers")
+        st.stop()
+
+    for r in rows:
+
+        offer_id, name, data, created_at = r
+
+        st.markdown(f"### 🧾 {name}")
+        st.caption(created_at)
+
+        df = pd.DataFrame(json.loads(data))
+
+        st.dataframe(df, use_container_width=True)
+
+        # Excel export
+        output = BytesIO()
+        df.to_excel(output, index=False)
+        output.seek(0)
+
+        st.download_button(
+            "⬇ Download Excel",
+            data=output,
+            file_name=f"{name}.xlsx"
+        )
+
+        st.markdown("---")
+
+# ================= UPLOAD =================
+elif page == "📤 Upload Data":
+
+    st.title("Upload Data")
+
+    files = st.file_uploader("Upload Excel", type=["xlsx"], accept_multiple_files=True)
+
+    if files:
+        total = 0
+
+        for f in files:
+
+            df = pd.read_excel(f)
+            df.columns = df.columns.str.strip().str.lower()
+
+            df.rename(columns={
+                "part no":"part_no",
+                "price [eur]":"price",
+                "item description":"description"
+            }, inplace=True)
+
+            df["part_no"] = df["part_no"].astype(str)
+            df["brand"] = df["brand"].astype(str)
+            df["price"] = pd.to_numeric(df["price"], errors="coerce")
+
+            df = df.fillna(0)
+
+            values = [
+                (
+                    r["part_no"],
+                    r["brand"],
+                    safe_float(r["price"]),
+                    r.get("description"),
+                    safe_int(r.get("moq"))
+                )
+                for _, r in df.iterrows()
+            ]
+
+            execute_values(cur,
+                "INSERT INTO parts_table (part_no, brand, price, description, moq) VALUES %s",
+                values
+            )
+
+            conn.commit()
+            total += len(values)
+
+        st.cache_data.clear()
+        st.success(f"Uploaded {total} rows")
+
+# ================= ADMIN =================
+elif page == "🛠 Admin Panel":
+
+    if username != "admin":
+        st.error("Access Denied")
+        st.stop()
+
+    st.title("Admin Panel")
+
+    st.subheader("Add User")
+    u = st.text_input("Username")
+    p = st.text_input("Password", type="password")
+
+    if st.button("Add User"):
+        cur.execute("INSERT INTO users (username,password) VALUES (%s,%s)",(u,p))
+        conn.commit()
+        st.success("User added")
+
+    st.subheader("Remove User")
+
+    cur.execute("SELECT username FROM users WHERE username!='admin'")
+    users = [x[0] for x in cur.fetchall()]
+
+    if users:
+        d = st.selectbox("Select user", users)
+
+        if st.button("Delete User"):
+            cur.execute("DELETE FROM users WHERE username=%s",(d,))
+            conn.commit()
+            st.success("User removed")
