@@ -301,10 +301,47 @@ elif page == "📤 Data Upload":
     if files:
         for f in files:
             df = pd.read_excel(f)
-            df.columns = df.columns.str.lower()
 
+            # 🔥 CLEAN COLUMN NAMES
+            df.columns = df.columns.str.strip().str.lower()
+
+            # 🔥 RENAME FLEXIBLE MATCHES
+            rename_map = {}
+
+            for col in df.columns:
+                if "part" in col:
+                    rename_map[col] = "part_no"
+                elif "brand" in col or "make" in col:
+                    rename_map[col] = "brand"
+                elif "price" in col or "rate" in col:
+                    rename_map[col] = "price"
+                elif "desc" in col:
+                    rename_map[col] = "description"
+
+            df.rename(columns=rename_map, inplace=True)
+
+            # 🔥 CHECK REQUIRED COLUMNS
+            required = ["part_no", "brand", "price"]
+
+            missing = [c for c in required if c not in df.columns]
+            if missing:
+                st.error(f"Missing columns: {missing}")
+                st.stop()
+
+            # 🔥 CLEAN DATA
+            df["part_no"] = df["part_no"].astype(str)
+            df["brand"] = df["brand"].astype(str)
+            df["price"] = pd.to_numeric(df["price"], errors="coerce").fillna(0)
+
+            # 🔥 INSERT
             values = [
-                (r["part_no"], r["brand"], safe_float(r["price"]), r.get("description"), 0)
+                (
+                    r["part_no"],
+                    r["brand"],
+                    safe_float(r["price"]),
+                    r.get("description", ""),
+                    0
+                )
                 for _, r in df.iterrows()
             ]
 
@@ -315,7 +352,7 @@ elif page == "📤 Data Upload":
             )
             conn.commit()
 
-        st.success("Uploaded")
+        st.success("Uploaded successfully")
 
 # ================= ADMIN =================
 elif page == "🛠Access Control":
